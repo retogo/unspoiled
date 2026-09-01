@@ -28,12 +28,12 @@ export function assessSection(section: Section): Assessment {
     return { level: "spoiler", reason: `analysis section "${section.heading}" discusses the ending` };
   }
   if (isLead(section)) {
-    return { level: "suspect", reason: "lead section often states the premise and the reveal" };
+    return { level: "safe", reason: "lead section, checked sentence by sentence" };
   }
   if (META_SECTIONS.test(section.heading)) {
-    return { level: "safe", reason: `production/reception section "${section.heading}"` };
+    return { level: "safe", reason: `production/publication section "${section.heading}"` };
   }
-  return { level: "suspect", reason: `unclassified section "${section.heading}"` };
+  return { level: "safe", reason: `section "${section.heading}", checked sentence by sentence` };
 }
 
 export function assessSentence(sentence: Sentence, section: Section): Assessment {
@@ -42,27 +42,41 @@ export function assessSentence(sentence: Sentence, section: Section): Assessment
     return sectionAssessment;
   }
   if (REVEAL_MARKERS.test(sentence.text)) {
-    return { level: "spoiler", reason: `reveal wording inside "${sectionHeading(section)}"` };
+    return { level: "suspect", reason: `reveal wording inside "${sectionHeading(section)}"` };
   }
-  if (isLead(section) || sectionAssessment.level === "safe") {
-    return { level: "safe", reason: sectionAssessment.reason };
-  }
-  return sectionAssessment;
+  return { level: "safe", reason: sectionAssessment.reason };
 }
 
 export type Policy = {
   level: "strict" | "balanced" | "open";
   revealed: string[];
+  alreadyKnows: string[];
+  knownSections: { sectionId: string; because: string }[];
   notes: string;
 };
 
-export const defaultPolicy: Policy = { level: "strict", revealed: [], notes: "" };
+export const defaultPolicy: Policy = {
+  level: "strict",
+  revealed: [],
+  alreadyKnows: [],
+  knownSections: [],
+  notes: "",
+};
 
 export function isHidden(assessment: Assessment, policy: Policy, sentenceId: string): boolean {
   if (policy.revealed.includes(sentenceId)) return false;
   if (policy.level === "open") return false;
   if (policy.level === "balanced") return assessment.level === "spoiler";
   return assessment.level !== "safe";
+}
+
+export function isSectionKnown(policy: Policy, sectionId: string): string | null {
+  return policy.knownSections.find((known) => known.sectionId === sectionId)?.because ?? null;
+}
+
+export function hiddenSentence(sentence: Sentence, section: Section, policy: Policy): boolean {
+  if (isSectionKnown(policy, section.id)) return false;
+  return isHidden(assessSentence(sentence, section), policy, sentence.id);
 }
 
 export function countHidden(article: Article, policy: Policy): { hidden: number; total: number } {
@@ -72,7 +86,7 @@ export function countHidden(article: Article, policy: Policy): { hidden: number;
     for (const paragraph of section.paragraphs) {
       for (const sentence of paragraph.sentences) {
         total += 1;
-        if (isHidden(assessSentence(sentence, section), policy, sentence.id)) hidden += 1;
+        if (hiddenSentence(sentence, section, policy)) hidden += 1;
       }
     }
   }

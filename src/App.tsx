@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assessSection, assessSentence, countHidden, defaultPolicy, isHidden, type Policy } from "./lib/risk";
+import { assessSection, assessSentence, countHidden, defaultPolicy, hiddenSentence, isSectionKnown, type Policy } from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
 import { buildTools } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
@@ -225,6 +225,22 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {policy.alreadyKnows.length > 0 && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <p className="font-medium">Your agent says you already know</p>
+                <ul className="mt-1 list-inside list-disc">
+                  {policy.alreadyKnows.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => setPolicy((current) => ({ ...current, alreadyKnows: [] }))}
+                  className="mt-1 underline"
+                >
+                  That is wrong — clear it
+                </button>
+              </div>
+            )}
             {policy.notes && (
               <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 Your agent said: {policy.notes}
@@ -285,6 +301,7 @@ function SectionView({
   onReveal: (sentenceIds: string[]) => void;
 }) {
   const risk = assessSection(section);
+  const known = isSectionKnown(policy, section.id);
   const groups = section.paragraphs.map((paragraph) => groupSentences(paragraph, section, policy));
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
 
@@ -292,7 +309,7 @@ function SectionView({
     const ids = groups.flatMap((group) => group.flatMap((run) => run.sentences.map((sentence) => sentence.id)));
     return (
       <section className="mt-6">
-        <SectionHeading section={section} risk={risk} />
+        <SectionHeading section={section} risk={risk} known={known} />
         <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-4">
           <p className="text-sm text-zinc-600">
             {ids.length} sentences withheld — {risk.reason}.
@@ -310,7 +327,7 @@ function SectionView({
 
   return (
     <section className="mt-6">
-      <SectionHeading section={section} risk={risk} />
+      <SectionHeading section={section} risk={risk} known={known} />
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
           {groups[index].map((run) =>
@@ -335,12 +352,26 @@ function SectionView({
   );
 }
 
-function SectionHeading({ section, risk }: { section: Section; risk: { level: string } }) {
+function SectionHeading({
+  section,
+  risk,
+  known,
+}: {
+  section: Section;
+  risk: { level: string };
+  known: string | null;
+}) {
   return (
-    <h3 className="flex items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
+    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
       {sectionHeading(section)}
-      {risk.level !== "safe" && (
-        <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">{risk.level}</span>
+      {known ? (
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+          shown — {known}
+        </span>
+      ) : (
+        risk.level !== "safe" && (
+          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">{risk.level}</span>
+        )
       )}
     </h3>
   );
@@ -357,7 +388,7 @@ function groupSentences(paragraph: Paragraph, section: Section, policy: Policy):
   const runs: SentenceRun[] = [];
   for (const sentence of paragraph.sentences) {
     const assessment = assessSentence(sentence, section);
-    const hidden = isHidden(assessment, policy, sentence.id);
+    const hidden = hiddenSentence(sentence, section, policy);
     const last = runs[runs.length - 1];
     if (last && last.hidden === hidden) {
       last.sentences.push(sentence);

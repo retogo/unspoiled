@@ -1,6 +1,6 @@
 import type { Article, Section } from "./segment";
 import { findEvidence } from "./search";
-import { assessSection, assessSentence, isHidden, type Policy } from "./risk";
+import { assessSection, assessSentence, hiddenSentence, isSectionKnown, type Policy } from "./risk";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
@@ -32,14 +32,16 @@ function sectionSummary(section: Section, policy: Policy) {
   let hidden = 0;
   for (const paragraph of section.paragraphs) {
     for (const sentence of paragraph.sentences) {
-      if (isHidden(assessSentence(sentence, section), policy, sentence.id)) hidden += 1;
+      if (hiddenSentence(sentence, section, policy)) hidden += 1;
       else visible += 1;
     }
   }
+  const known = isSectionKnown(policy, section.id);
   return {
     section_id: section.id,
     heading: section.heading,
-    risk: assessSection(section).level,
+    risk: known ? "known-to-reader" : assessSection(section).level,
+    known_because: known ?? undefined,
     visible_sentences: visible,
     hidden_sentences: hidden,
   };
@@ -50,7 +52,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_article_outline",
       description:
-        "List the sections of the article that is currently open, with how many sentences are visible and how many are withheld as spoilers. Returns no article text.",
+        "List the sections of the article that is currently open, with how many sentences are visible and how many are withheld as spoilers. Returns no article text — call get_safe_text on the sections the reader asked about to actually read them, and describe_hidden to see what is being held back.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
@@ -67,7 +69,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_safe_text",
       description:
-        "Read one section with the spoiler sentences removed. Only text the reader has chosen to be exposed to is returned; withheld sentences appear as placeholders.",
+        "Read one section with the spoiler sentences removed. Only text the reader has chosen to be exposed to is returned; withheld sentences appear as placeholders. Summarise from this text alone, and tell the reader how many sentences were withheld rather than guessing at their content.",
       inputSchema: {
         type: "object",
         properties: { section_id: { type: "string", description: "Section id from get_article_outline" } },
@@ -83,7 +85,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           heading: section.heading,
           paragraphs: section.paragraphs.map((paragraph) =>
             paragraph.sentences.map((sentence) =>
-              isHidden(assessSentence(sentence, section), policy, sentence.id)
+              hiddenSentence(sentence, section, policy)
                 ? { withheld: true, sentence_id: sentence.id }
                 : { withheld: false, sentence_id: sentence.id, text: sentence.text },
             ),
@@ -109,7 +111,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         for (const paragraph of section.paragraphs) {
           for (const sentence of paragraph.sentences) {
             const assessment = assessSentence(sentence, section);
-            if (!isHidden(assessment, policy, sentence.id)) continue;
+            if (!hiddenSentence(sentence, section, policy)) continue;
             hidden.push({
               sentence_id: sentence.id,
               risk: assessment.level,
@@ -124,15 +126,18 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "set_spoiler_policy",
       description:
-        "Set how much the reader is willing to see. 'strict' withholds narrative and suspect sentences, 'balanced' withholds only confirmed spoilers, 'open' withholds nothing. Record in notes what the reader already knows (works they have seen, source material they have read) so the choice is visible to them on screen.",
+        "Set how much of this article the reader is willing to see, and tell the page what they already know. 'strict' withholds narrative and suspect sentences, 'balanced' withholds only confirmed spoilers, 'open' withholds nothing. Fill already_knows from what you know about this particular reader — works they have watched, source novels or manga they have read, seasons they have finished — because a fact they already know is not a spoiler for them. Everything you pass here is displayed on screen for them to correct, so state it plainly rather than guessing.",
       inputSchema: {
         type: "object",
         properties: {
           level: { type: "string", enum: ["strict", "balanced", "open"] },
-          notes: {
-            type: "string",
-            description: "What the reader already knows, in their own terms. Shown on screen for them to correct.",
+          already_knows: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Specific things this reader has already seen or read, e.g. 'read the original manga', 'finished season 1', 'saw the 1998 original'. Leave empty if you do not know.",
           },
+          notes: { type: "string", description: "Anything else about how much this reader wants to know." },
         },
         required: ["level"],
         additionalProperties: false,
@@ -142,10 +147,19 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const next: Policy = {
           level: input.level as Policy["level"],
           revealed: policy.revealed,
+          alreadyKnows: Array.isArray(input.already_knows)
+            ? (input.already_knows as string[])
+            : policy.alreadyKnows,
+          knownSections: policy.knownSections,
           notes: typeof input.notes === "string" ? input.notes : policy.notes,
         };
         context.setPolicy(next);
-        return { applied: next.level, notes: next.notes };
+        return {
+          applied: next.level,
+          already_knows: next.alreadyKnows,
+          shown_on_screen: true,
+          hint: "Call get_article_outline next to see what is visible under this policy.",
+        };
       },
     },
     {
@@ -192,6 +206,40 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           total_hidden: sections.reduce((sum, section) => sum + section.hidden_sentences, 0),
           total_visible: sections.reduce((sum, section) => sum + section.visible_sentences, 0),
           sections,
+        };
+      },
+    },
+    {
+      name: "mark_known_sections",
+      description:
+        "Unhide whole sections that this reader has already lived through, because a fact they already know is not a spoiler for them. Map what you know about them onto the section list: someone who finished season 1 can safely read the season 1 sections, someone who read the source novel can read the plot of the adaptation. Give the reason in 'because' — it is shown next to the section on their screen so they can disagree.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section_ids: { type: "array", items: { type: "string" } },
+          because: { type: "string", description: "Why this reader already knows it, in their terms." },
+        },
+        required: ["section_ids", "because"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const article = requireArticle(context);
+        const policy = context.policy();
+        const because = String(input.because);
+        const ids = ((input.section_ids as string[]) ?? []).filter((id) =>
+          article.sections.some((section) => section.id === id),
+        );
+        const knownSections = [
+          ...policy.knownSections.filter((known) => !ids.includes(known.sectionId)),
+          ...ids.map((sectionId) => ({ sectionId, because })),
+        ];
+        context.setPolicy({ ...policy, knownSections });
+        return {
+          unhidden_sections: ids.map((id) => ({
+            section_id: id,
+            heading: article.sections.find((section) => section.id === id)?.heading,
+          })),
+          because,
         };
       },
     },

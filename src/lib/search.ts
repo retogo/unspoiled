@@ -1,6 +1,6 @@
 import type { Article, Section, Sentence } from "./segment";
 import { sectionHeading } from "./segment";
-import { assessSentence, isHidden, type Policy } from "./risk";
+import { hiddenSentence, type Policy } from "./risk";
 
 export type Evidence = {
   sentence_id: string;
@@ -28,7 +28,7 @@ export function findEvidence(article: Article, policy: Policy, question: string,
   const visit = (section: Section) => {
     for (const paragraph of section.paragraphs) {
       for (const sentence of paragraph.sentences) {
-        if (isHidden(assessSentence(sentence, section), policy, sentence.id)) {
+        if (hiddenSentence(sentence, section, policy)) {
           excluded += 1;
           continue;
         }
