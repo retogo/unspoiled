@@ -11,6 +11,9 @@ export type Assessment = {
 const NARRATIVE_SECTIONS =
   /^(plot|synopsis|story|storyline|plot summary|summary|ending|episodes?|episode list|characters?|あらすじ|ストーリー|物語|各話|エピソード|結末|登場人物)/i;
 
+const ANALYSIS_SECTIONS =
+  /^(themes?|analysis|interpretation|symbolism|meaning|influences?|テーマ|考察|解釈|作品分析)/i;
+
 const META_SECTIONS =
   /^(production|development|casting|filming|music|release|home media|reception|box office|critical response|accolades|awards|legacy|references|external links|see also|製作|制作|公開|評価|受賞|脚注|関連項目|外部リンク|キャスト)/i;
 
@@ -20,6 +23,9 @@ const REVEAL_MARKERS =
 export function assessSection(section: Section): Assessment {
   if (NARRATIVE_SECTIONS.test(section.heading)) {
     return { level: "spoiler", reason: `narrative section "${section.heading}"` };
+  }
+  if (ANALYSIS_SECTIONS.test(section.heading)) {
+    return { level: "spoiler", reason: `analysis section "${section.heading}" discusses the ending` };
   }
   if (isLead(section)) {
     return { level: "suspect", reason: "lead section often states the premise and the reveal" };

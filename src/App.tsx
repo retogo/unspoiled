@@ -28,11 +28,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
+  const [scanned, setScanned] = useState<string[]>([]);
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
+  const scannedRef = useRef<string[]>(scanned);
   articleRef.current = article;
   policyRef.current = policy;
+  scannedRef.current = scanned;
 
   const openArticle = useCallback(async (nextLang: Lang, title: string) => {
     setLang(nextLang);
@@ -43,6 +46,7 @@ export default function App() {
       const fetched = await fetchArticle(nextLang, title);
       setArticle(segmentArticle(fetched));
       setPolicy((current) => ({ ...current, revealed: [] }));
+      setScanned([]);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -60,11 +64,35 @@ export default function App() {
         policy: () => policyRef.current,
         setPolicy: (next) => setPolicy(next),
         openArticle: (toolLang, title) => void openArticleRef.current(toolLang, title),
+        scanned: () => scannedRef.current,
+        markScanned: (sectionId) =>
+          setScanned((current) => (current.includes(sectionId) ? current : [...current, sectionId])),
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
     setRegistration(state);
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedTitle = params.get("title");
+    const sharedLevel = params.get("level") as Policy["level"] | null;
+    const storedLevel = window.localStorage.getItem("unspoiled.level") as Policy["level"] | null;
+    const level = sharedLevel ?? storedLevel;
+    if (level) setPolicy((current) => ({ ...current, level }));
+    if (sharedTitle) void openArticle((params.get("lang") as Lang) ?? "en", sharedTitle);
+  }, [openArticle]);
+
+  useEffect(() => {
+    window.localStorage.setItem("unspoiled.level", policy.level);
+    const params = new URLSearchParams();
+    params.set("level", policy.level);
+    if (article) {
+      params.set("lang", article.lang);
+      params.set("title", article.title);
+    }
+    window.history.replaceState(null, "", `?${params}`);
+  }, [article, policy.level]);
 
   const search = useCallback(async () => {
     if (term.trim().length === 0) return;
@@ -203,6 +231,18 @@ export default function App() {
               </p>
             )}
           </section>
+
+          {scanned.length > 0 && (
+            <section>
+              <h3 className="font-semibold">Your agent has read</h3>
+              <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                {scanned
+                  .map((id) => article?.sections.find((section) => section.id === id)?.heading ?? id)
+                  .join(", ")}
+                . It knows those spoilers for the rest of this conversation.
+              </p>
+            </section>
+          )}
 
           <section>
             <h3 className="font-semibold">Tool activity</h3>

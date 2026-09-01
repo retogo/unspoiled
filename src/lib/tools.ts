@@ -1,4 +1,5 @@
 import type { Article, Section } from "./segment";
+import { findEvidence } from "./search";
 import { assessSection, assessSentence, isHidden, type Policy } from "./risk";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
@@ -8,6 +9,8 @@ export type ToolContext = {
   policy: () => Policy;
   setPolicy: (next: Policy) => void;
   openArticle: (lang: Lang, title: string) => void;
+  scanned: () => string[];
+  markScanned: (sectionId: string) => void;
 };
 
 const noInput = { type: "object", properties: {}, additionalProperties: false };
@@ -185,9 +188,70 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         return {
           title: article.displayTitle,
           policy,
+          sections_the_agent_has_read: context.scanned(),
           total_hidden: sections.reduce((sum, section) => sum + section.hidden_sentences, 0),
           total_visible: sections.reduce((sum, section) => sum + section.visible_sentences, 0),
           sections,
+        };
+      },
+    },
+    {
+      name: "ask_about_article",
+      description:
+        "Find sentences in the article that answer a question, drawn only from text the reader is currently allowed to see. Withheld sentences are never searched, so an answer built from this evidence cannot contain a spoiler. The count of excluded sentences is returned so you can tell the reader that something was left out.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          question: { type: "string" },
+          limit: { type: "integer", description: "How many sentences of evidence to return (default 8)" },
+        },
+        required: ["question"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const article = requireArticle(context);
+        const limit = typeof input.limit === "number" ? input.limit : 8;
+        const found = findEvidence(article, context.policy(), String(input.question), limit);
+        return {
+          question: input.question,
+          grounded_in: "visible sentences only",
+          ...found,
+        };
+      },
+    },
+    {
+      name: "scan_section",
+      description:
+        "Read a withheld section in full, including the spoilers. This is a one-way door: once you read it you know the ending, and you may leak it later in conversation. Only call this with acknowledge=true after the reader has explicitly asked you to look. The reader is shown on screen which sections you have read.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          acknowledge: {
+            type: "boolean",
+            description: "Set to true to confirm the reader asked you to read the withheld text.",
+          },
+        },
+        required: ["section_id", "acknowledge"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const article = requireArticle(context);
+        const section = findSection(article, input.section_id);
+        if (input.acknowledge !== true) {
+          return {
+            refused: true,
+            message:
+              "Withheld text is not returned without acknowledge=true. Ask the reader whether they want the spoilers first.",
+          };
+        }
+        context.markScanned(section.id);
+        return {
+          section_id: section.id,
+          heading: section.heading,
+          sentences: section.paragraphs.flatMap((paragraph) =>
+            paragraph.sentences.map((sentence) => ({ sentence_id: sentence.id, text: sentence.text })),
+          ),
         };
       },
     },

@@ -28,8 +28,13 @@ them.
 
 And one property falls out of the tool surface itself: `get_safe_text` returns withheld sentences
 as placeholders, and `describe_hidden` returns their reasons and lengths but never their text.
-There is no tool that returns the ending. The agent is not asked to keep a secret — it is never
-given one.
+There is no tool that hands over the ending by default. `ask_about_article` searches only the
+sentences you are allowed to see, so an answer built from it cannot contain a spoiler. The agent is
+not asked to keep a secret — it is never given one.
+
+The one door that does open, `scan_section`, refuses to return anything unless the caller confirms
+you asked for it, and the sections your agent has read are listed on screen for the rest of the
+session. Consent is a state you can see, not a promise in a prompt.
 
 ## Tools
 
@@ -41,7 +46,9 @@ given one.
 | `describe_hidden` | What is withheld and why — ids, reasons, lengths, never the text |
 | `set_spoiler_policy` | How much this reader wants to see, plus what they already know |
 | `reveal` | Reveal specific sentences, when the reader asks for them |
-| `get_masking_report` | Audit of everything currently withheld |
+| `ask_about_article` | Search for evidence answering a question, drawn only from visible sentences |
+| `scan_section` | Read a withheld section in full — refused unless the reader explicitly asked |
+| `get_masking_report` | Audit of everything currently withheld, and which sections the agent has read |
 
 ## Running it
 
