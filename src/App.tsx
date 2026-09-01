@@ -146,7 +146,7 @@ export default function App() {
               onChange={(event) => setTerm(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && void search()}
               placeholder="Search Wikipedia for a film, series or novel"
-              className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+              className="min-w-0 flex-1 basis-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm sm:basis-auto"
             />
             <button
               onClick={() => void search()}
