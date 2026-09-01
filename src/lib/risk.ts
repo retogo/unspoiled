@@ -36,6 +36,18 @@ export function assessSection(section: Section): Assessment {
   return { level: "safe", reason: `section "${section.heading}", checked sentence by sentence` };
 }
 
+export function assessHeading(section: Section): Assessment | null {
+  if (isLead(section)) return null;
+  if (REVEAL_MARKERS.test(section.heading)) {
+    return { level: "spoiler", reason: "the heading itself names the reveal" };
+  }
+  return null;
+}
+
+export function headingId(section: Section): string {
+  return `${section.id}.heading`;
+}
+
 export function assessSentence(sentence: Sentence, section: Section): Assessment {
   const sectionAssessment = assessSection(section);
   if (sectionAssessment.level === "spoiler") {
@@ -50,6 +62,7 @@ export function assessSentence(sentence: Sentence, section: Section): Assessment
 export type Policy = {
   level: "strict" | "balanced" | "open";
   revealed: string[];
+  withheld: string[];
   alreadyKnows: string[];
   knownSections: { sectionId: string; because: string }[];
   notes: string;
@@ -58,6 +71,7 @@ export type Policy = {
 export const defaultPolicy: Policy = {
   level: "strict",
   revealed: [],
+  withheld: [],
   alreadyKnows: [],
   knownSections: [],
   notes: "",
@@ -75,8 +89,19 @@ export function isSectionKnown(policy: Policy, sectionId: string): string | null
 }
 
 export function hiddenSentence(sentence: Sentence, section: Section, policy: Policy): boolean {
+  if (policy.revealed.includes(sentence.id)) return false;
+  if (policy.withheld.includes(sentence.id)) return true;
   if (isSectionKnown(policy, section.id)) return false;
   return isHidden(assessSentence(sentence, section), policy, sentence.id);
+}
+
+export function hiddenHeading(section: Section, policy: Policy): Assessment | null {
+  const assessment = assessHeading(section);
+  if (!assessment) return null;
+  if (policy.level === "open") return null;
+  if (policy.revealed.includes(headingId(section))) return null;
+  if (isSectionKnown(policy, section.id)) return null;
+  return assessment;
 }
 
 export function countHidden(article: Article, policy: Policy): { hidden: number; total: number } {

@@ -32,6 +32,9 @@ There is no tool that hands over the ending by default. `ask_about_article` sear
 sentences you are allowed to see, so an answer built from it cannot contain a spoiler. The agent is
 not asked to keep a secret — it is never given one.
 
+Headings are withheld too, when the heading is the spoiler: `Series finale` comes back to the agent
+as `null` with a reason, not as text. A summary of a section it cannot name cannot leak the name.
+
 The one door that does open, `scan_section`, refuses to return anything unless the caller confirms
 you asked for it, and the sections your agent has read are listed on screen for the rest of the
 session. Consent is a state you can see, not a promise in a prompt.
@@ -45,7 +48,10 @@ session. Consent is a state you can see, not a promise in a prompt.
 | `get_safe_text` | One section with withheld sentences replaced by placeholders |
 | `describe_hidden` | What is withheld and why — ids, reasons, lengths, never the text |
 | `set_spoiler_policy` | How much this reader wants to see, plus what they already know |
+| `mark_known_sections` | Unhide sections this reader has already lived through, with the reason shown |
+| `withhold` | Withhold what the page's wording rules missed — the agent's judgement, the page's enforcement |
 | `reveal` | Reveal specific sentences, when the reader asks for them |
+| `reveal_progressively` | Open a plot only as far as the reader has watched |
 | `ask_about_article` | Search for evidence answering a question, drawn only from visible sentences |
 | `scan_section` | Read a withheld section in full — refused unless the reader explicitly asked |
 | `get_masking_report` | Audit of everything currently withheld, and which sections the agent has read |

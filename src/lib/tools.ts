@@ -1,6 +1,14 @@
 import type { Article, Section } from "./segment";
 import { findEvidence } from "./search";
-import { assessSection, assessSentence, hiddenSentence, isSectionKnown, type Policy } from "./risk";
+import {
+  assessSection,
+  assessSentence,
+  headingId,
+  hiddenHeading,
+  hiddenSentence,
+  isSectionKnown,
+  type Policy,
+} from "./risk";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
@@ -37,9 +45,11 @@ function sectionSummary(section: Section, policy: Policy) {
     }
   }
   const known = isSectionKnown(policy, section.id);
+  const withheldHeading = hiddenHeading(section, policy);
   return {
     section_id: section.id,
-    heading: section.heading,
+    heading: withheldHeading ? null : section.heading,
+    heading_withheld: withheldHeading?.reason,
     risk: known ? "known-to-reader" : assessSection(section).level,
     known_because: known ?? undefined,
     visible_sentences: visible,
@@ -82,7 +92,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const section = findSection(article, input.section_id);
         return {
           section_id: section.id,
-          heading: section.heading,
+          heading: hiddenHeading(section, policy) ? null : section.heading,
           paragraphs: section.paragraphs.map((paragraph) =>
             paragraph.sentences.map((sentence) =>
               hiddenSentence(sentence, section, policy)
@@ -120,7 +130,12 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
             });
           }
         }
-        return { section_id: section.id, heading: section.heading, hidden };
+        return {
+          section_id: section.id,
+          heading: hiddenHeading(section, policy) ? null : section.heading,
+          heading_withheld: hiddenHeading(section, policy)?.reason,
+          hidden,
+        };
       },
     },
     {
@@ -147,6 +162,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const next: Policy = {
           level: input.level as Policy["level"],
           revealed: policy.revealed,
+          withheld: policy.withheld,
           alreadyKnows: Array.isArray(input.already_knows)
             ? (input.already_knows as string[])
             : policy.alreadyKnows,
@@ -165,7 +181,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "reveal",
       description:
-        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. The revealed text is shown on their screen and returned here.",
+        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a section's heading id (from heading_withheld) to reveal a withheld heading. The revealed text is shown on their screen and returned here.",
       inputSchema: {
         type: "object",
         properties: {
@@ -181,6 +197,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         context.setPolicy({ ...policy, revealed: [...new Set([...policy.revealed, ...ids])] });
         const revealed = [];
         for (const section of article.sections) {
+          if (ids.includes(headingId(section))) {
+            revealed.push({ sentence_id: headingId(section), text: section.heading });
+          }
           for (const paragraph of section.paragraphs) {
             for (const sentence of paragraph.sentences) {
               if (ids.includes(sentence.id)) revealed.push({ sentence_id: sentence.id, text: sentence.text });
@@ -240,6 +259,76 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
             heading: article.sections.find((section) => section.id === id)?.heading,
           })),
           because,
+        };
+      },
+    },
+    {
+      name: "withhold",
+      description:
+        "Withhold text the page's own rules did not catch. The page matches wording, so it misses a spoiler stated plainly — 'his mother is eaten by a Titan' contains no giveaway words. Use this when the reader tells you what they do not want to know, or after scan_section, where you can spend your own knowledge to protect theirs: read the plot, then withhold only the sentences that give away the ending so they can safely read the rest. The reason is shown on their screen.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sentence_ids: { type: "array", items: { type: "string" } },
+          section_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Withhold every sentence in these sections.",
+          },
+          because: { type: "string" },
+        },
+        required: ["because"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const article = requireArticle(context);
+        const policy = context.policy();
+        const sectionIds = (input.section_ids as string[]) ?? [];
+        const fromSections = article.sections
+          .filter((section) => sectionIds.includes(section.id))
+          .flatMap((section) => section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((s) => s.id)));
+        const ids = [...((input.sentence_ids as string[]) ?? []), ...fromSections];
+        context.setPolicy({
+          ...policy,
+          withheld: [...new Set([...policy.withheld, ...ids])],
+          revealed: policy.revealed.filter((id) => !ids.includes(id)),
+          notes: String(input.because),
+        });
+        return { withheld: ids.length, because: input.because };
+      },
+    },
+    {
+      name: "reveal_progressively",
+      description:
+        "Open a withheld narrative section only up to a point. Plot summaries run in order, so a reader who stopped watching partway can safely read the beginning: reveal the first few paragraphs and leave the rest closed. Prefer this over revealing a whole section.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section_id: { type: "string" },
+          paragraphs: { type: "integer", description: "How many paragraphs from the start to open." },
+          because: { type: "string" },
+        },
+        required: ["section_id", "paragraphs"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const article = requireArticle(context);
+        const policy = context.policy();
+        const section = findSection(article, input.section_id);
+        const count = Math.max(0, Number(input.paragraphs));
+        const opened = section.paragraphs.slice(0, count);
+        const ids = opened.flatMap((paragraph) => paragraph.sentences.map((sentence) => sentence.id));
+        context.setPolicy({
+          ...policy,
+          revealed: [...new Set([...policy.revealed, ...ids])],
+          withheld: policy.withheld.filter((id) => !ids.includes(id)),
+        });
+        return {
+          section_id: section.id,
+          paragraphs_opened: opened.length,
+          paragraphs_remaining: section.paragraphs.length - opened.length,
+          sentences_opened: ids.length,
+          because: input.because,
         };
       },
     },

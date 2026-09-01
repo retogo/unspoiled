@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { assessSection, assessSentence, countHidden, defaultPolicy, hiddenSentence, isSectionKnown, type Policy } from "./lib/risk";
+import {
+  assessSection,
+  assessSentence,
+  countHidden,
+  defaultPolicy,
+  headingId,
+  hiddenHeading,
+  hiddenSentence,
+  isSectionKnown,
+  type Policy,
+} from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
 import { buildTools } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
@@ -306,20 +316,28 @@ function SectionView({
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
 
   if (allHidden) {
-    const ids = groups.flatMap((group) => group.flatMap((run) => run.sentences.map((sentence) => sentence.id)));
     return (
       <section className="mt-6">
-        <SectionHeading section={section} risk={risk} known={known} />
-        <div className="mt-3 rounded-lg border border-dashed border-zinc-300 bg-white px-4 py-4">
-          <p className="text-sm text-zinc-600">
-            {ids.length} sentences withheld — {risk.reason}.
-          </p>
-          <button
-            onClick={() => onReveal(ids)}
-            className="mt-2 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:bg-zinc-50"
-          >
-            Reveal this section anyway
-          </button>
+        <SectionHeading section={section} risk={risk} known={known} policy={policy} onReveal={onReveal} />
+        <p className="mt-2 text-xs text-zinc-500">
+          {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
+          open only as far as you have watched.
+        </p>
+        <div className="mt-2 space-y-1.5">
+          {section.paragraphs.map((paragraph, index) => (
+            <button
+              key={paragraph.id}
+              onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
+              className="flex w-full items-baseline gap-2 rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-left text-xs text-zinc-600 hover:border-zinc-400"
+            >
+              <span className="font-medium">Paragraph {index + 1}</span>
+              <span className="text-zinc-400">
+                {paragraph.sentences.length} sentences ·{" "}
+                {paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0)} chars
+              </span>
+              <span className="ml-auto underline">reveal</span>
+            </button>
+          ))}
         </div>
       </section>
     );
@@ -327,7 +345,7 @@ function SectionView({
 
   return (
     <section className="mt-6">
-      <SectionHeading section={section} risk={risk} known={known} />
+      <SectionHeading section={section} risk={risk} known={known} policy={policy} onReveal={onReveal} />
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
           {groups[index].map((run) =>
@@ -356,14 +374,29 @@ function SectionHeading({
   section,
   risk,
   known,
+  policy,
+  onReveal,
 }: {
   section: Section;
   risk: { level: string };
   known: string | null;
+  policy: Policy;
+  onReveal: (ids: string[]) => void;
 }) {
+  const withheldHeading = hiddenHeading(section, policy);
   return (
     <h3 className="flex flex-wrap items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
-      {sectionHeading(section)}
+      {withheldHeading ? (
+        <button
+          onClick={() => onReveal([headingId(section)])}
+          title={withheldHeading.reason}
+          className="rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
+        >
+          Heading withheld · reveal
+        </button>
+      ) : (
+        sectionHeading(section)
+      )}
       {known ? (
         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
           shown — {known}
