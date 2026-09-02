@@ -13,6 +13,7 @@ export type Paragraph = {
 export type Section = {
   id: string;
   heading: string;
+  headingPath: string[];
   level: number;
   paragraphs: Paragraph[];
 };
@@ -52,16 +53,28 @@ export function segmentArticle(fetched: FetchedArticle): Article {
     .querySelector(".mw-parser-output");
 
   const sections: Section[] = [];
-  let current: Section = { id: "s0", heading: LEAD_HEADING, level: 2, paragraphs: [] };
+  const ancestors: { text: string; level: number }[] = [];
+  let current: Section = {
+    id: "s0",
+    heading: LEAD_HEADING,
+    headingPath: [LEAD_HEADING],
+    level: 2,
+    paragraphs: [],
+  };
   let paragraphCount = 0;
 
   for (const element of Array.from(container?.children ?? [])) {
     const heading = headingOf(element);
     if (heading) {
       sections.push(current);
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1].level >= heading.level) {
+        ancestors.pop();
+      }
+      ancestors.push(heading);
       current = {
         id: `s${sections.length}`,
         heading: heading.text,
+        headingPath: ancestors.map((ancestor) => ancestor.text),
         level: heading.level,
         paragraphs: [],
       };

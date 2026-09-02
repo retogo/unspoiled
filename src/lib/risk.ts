@@ -21,11 +21,13 @@ const REVEAL_MARKERS =
   /\btwist|\breveal|\bbetray|\bresurrect|\bactually\b|\bturns out\b|\bin the end\b|\bfinale\b|\bfinal (scene|episode|act)\b|\bdies\b|\bdeath of\b|\bis killed\b|\bthe killer\b|\bmurderer\b|\bending\b|\bclimax\b|\bepilogue\b|実は|正体|結末|最終回|最後に|死ぬ|殺され|裏切/i
 
 export function assessSection(section: Section): Assessment {
-  if (NARRATIVE_SECTIONS.test(section.heading)) {
-    return { level: "spoiler", reason: `narrative section "${section.heading}"` };
+  const narrative = section.headingPath.find((heading) => NARRATIVE_SECTIONS.test(heading));
+  if (narrative) {
+    return { level: "spoiler", reason: `narrative section "${narrative}"` };
   }
-  if (ANALYSIS_SECTIONS.test(section.heading)) {
-    return { level: "spoiler", reason: `analysis section "${section.heading}" discusses the ending` };
+  const analysis = section.headingPath.find((heading) => ANALYSIS_SECTIONS.test(heading));
+  if (analysis) {
+    return { level: "spoiler", reason: `analysis section "${analysis}" discusses the ending` };
   }
   if (isLead(section)) {
     return { level: "safe", reason: "lead section, checked sentence by sentence" };
