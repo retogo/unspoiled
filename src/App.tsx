@@ -18,7 +18,7 @@ import {
   scannedForArticle,
   type ScannedSection,
 } from "./lib/session";
-import { buildTools } from "./lib/tools";
+import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
 import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
 
@@ -50,24 +50,33 @@ export default function App() {
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
   const scannedRef = useRef<ScannedSection[]>(scanned);
+  const openRequestRef = useRef(0);
   articleRef.current = article;
   policyRef.current = policy;
   scannedRef.current = scanned;
 
-  const openArticle = useCallback(async (nextLang: Lang, title: string) => {
+  const openArticle = useCallback(async (nextLang: Lang, title: string): Promise<OpenResult> => {
+    const request = openRequestRef.current + 1;
+    openRequestRef.current = request;
     setLang(nextLang);
     setLoading(true);
     setError(null);
     setHits([]);
     try {
       const fetched = await fetchArticle(nextLang, title);
+      if (openRequestRef.current !== request) return { status: "superseded" };
       const opened = segmentArticle(fetched);
+      const opening = policyForOpened(policyRef.current, articleRef.current, opened);
       setArticle(opened);
-      setPolicy(policyForOpened(policyRef.current, articleRef.current, opened));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
+      setPolicy(opening);
       setLoading(false);
+      return { status: "opened", article: opened, policy: opening };
+    } catch (cause) {
+      if (openRequestRef.current !== request) return { status: "superseded" };
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      setLoading(false);
+      return { status: "failed", error: message };
     }
   }, []);
 
@@ -80,7 +89,7 @@ export default function App() {
         article: () => articleRef.current,
         policy: () => policyRef.current,
         setPolicy: (next) => setPolicy(next),
-        openArticle: (toolLang, title) => void openArticleRef.current(toolLang, title),
+        openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
         markScanned: (open, sectionId) => {
           const key = articleKey(open.lang, open.title);

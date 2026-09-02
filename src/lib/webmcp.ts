@@ -41,9 +41,9 @@ function parseInput(raw: unknown): Record<string, unknown> {
   return (raw as Record<string, unknown>) ?? {};
 }
 
-function runTool(definition: ToolDefinition, input: Record<string, unknown>): unknown {
+async function runTool(definition: ToolDefinition, input: Record<string, unknown>): Promise<unknown> {
   try {
-    return definition.execute(input);
+    return await definition.execute(input);
   } catch (cause) {
     return { error: cause instanceof Error ? cause.message : String(cause) };
   }
@@ -63,7 +63,7 @@ export function registerTools(
       inputSchema: definition.inputSchema,
       execute: async (raw: unknown) => {
         const input = parseInput(raw);
-        const text = JSON.stringify(runTool(definition, input));
+        const text = JSON.stringify(await runTool(definition, input));
         onCall({
           at: Date.now(),
           tool: definition.name,

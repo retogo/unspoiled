@@ -12,11 +12,22 @@ import {
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
+/**
+ * Opening an article is asynchronous, so the outcome is reported back rather
+ * than assumed: the article that was actually fetched, together with the policy
+ * that now applies to it, so a caller does not have to wait for a re-render to
+ * describe it.
+ */
+export type OpenResult =
+  | { status: "opened"; article: Article; policy: Policy }
+  | { status: "superseded" }
+  | { status: "failed"; error: string };
+
 export type ToolContext = {
   article: () => Article | null;
   policy: () => Policy;
   setPolicy: (next: Policy) => void;
-  openArticle: (lang: Lang, title: string) => void;
+  openArticle: (lang: Lang, title: string) => Promise<OpenResult>;
   scanned: () => string[];
   markScanned: (article: Article, sectionId: string) => void;
 };
@@ -394,7 +405,8 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     },
     {
       name: "open_article",
-      description: "Open a Wikipedia article by title in the reader.",
+      description:
+        "Open a Wikipedia article by title in the reader, and wait until it is on screen. Returns the same section list as get_article_outline, so the section ids in it are safe to use straight away. A title that does not exist returns an error rather than opening anything.",
       inputSchema: {
         type: "object",
         properties: {
@@ -404,11 +416,24 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         required: ["title"],
         additionalProperties: false,
       },
-      execute: (input) => {
+      execute: async (input) => {
         const lang = (input.language as Lang) ?? "en";
         const title = String(input.title);
-        context.openArticle(lang, title);
-        return { opening: title, language: lang };
+        const result = await context.openArticle(lang, title);
+        if (result.status === "failed") throw new Error(result.error);
+        if (result.status === "superseded") {
+          return {
+            superseded: true,
+            message: "A later open_article replaced this one. The reader is looking at that article instead.",
+          };
+        }
+        return {
+          title: result.article.displayTitle,
+          language: result.article.lang,
+          source_url: result.article.sourceUrl,
+          policy_level: result.policy.level,
+          sections: result.article.sections.map((section) => sectionSummary(section, result.policy)),
+        };
       },
     },
   ];

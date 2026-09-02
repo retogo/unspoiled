@@ -187,6 +187,88 @@ describe("opening another article", () => {
   });
 });
 
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+describe("open_article", () => {
+  it("returns the article it opened, once the fetch has finished", async () => {
+    const { registered } = installAgent();
+    render(<App />);
+
+    const result = await callTool(registered, "open_article", { title: "Attack on Titan" });
+
+    expect(result.title).toBe("Attack on Titan");
+    expect(result.language).toBe("en");
+    expect(result.sections).toHaveLength(3);
+    expect(screen.getByRole("heading", { level: 2, name: "Attack on Titan" })).toBeTruthy();
+  });
+
+  it("reports a title that does not exist instead of a successful open", async () => {
+    const { registered } = installAgent();
+    render(<App />);
+
+    const result = await callTool(registered, "open_article", { title: "Nonexistent Film" });
+
+    expect(String(result.error)).toContain("does not exist");
+    expect(result.title).toBeUndefined();
+  });
+
+  it("has the article in place for the tools that follow it", async () => {
+    const { registered } = installAgent();
+    render(<App />);
+
+    await callTool(registered, "open_article", { title: "Attack on Titan" });
+    await callTool(registered, "open_article", { title: "The Sixth Sense" });
+
+    const outline = await callTool(registered, "get_article_outline");
+    expect(outline.title).toBe("The Sixth Sense");
+  });
+
+  it("describes the new article under the policy that now applies to it", async () => {
+    const { registered } = installAgent();
+    render(<App />);
+
+    await callTool(registered, "open_article", { title: "Attack on Titan" });
+    await callTool(registered, "mark_known_sections", { section_ids: ["s2"], because: "finished season 1" });
+
+    const result = await callTool(registered, "open_article", { title: "The Sixth Sense" });
+
+    const sections = result.sections as { section_id: string; risk: string }[];
+    expect(sections.find((section) => section.section_id === "s2")?.risk).toBe("spoiler");
+  });
+
+  it("lets the last request win when an earlier fetch finishes after it", async () => {
+    const { registered } = installAgent();
+    render(<App />);
+    const titan = deferred<FetchedArticle>();
+    const sixthSense = deferred<FetchedArticle>();
+    vi.mocked(fetchArticle)
+      .mockImplementationOnce(() => titan.promise)
+      .mockImplementationOnce(() => sixthSense.promise);
+
+    const open = toolNamed(registered, "open_article");
+    let superseded: Record<string, unknown> = {};
+    await act(async () => {
+      const first = open.execute(JSON.stringify({ title: "Attack on Titan" }));
+      const second = open.execute(JSON.stringify({ title: "The Sixth Sense" }));
+      sixthSense.resolve(SIXTH_SENSE);
+      titan.resolve(TITAN);
+      superseded = JSON.parse((await first).content[0].text) as Record<string, unknown>;
+      await second;
+    });
+
+    expect(screen.getByRole("heading", { level: 2, name: "The Sixth Sense" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Attack on Titan" })).toBeNull();
+    expect(superseded.superseded).toBe(true);
+    expect(window.location.search).toContain("title=The+Sixth+Sense");
+  });
+});
+
 describe("the record of what the agent has read", () => {
   it("survives opening the same article again", async () => {
     const { registered } = installAgent();
