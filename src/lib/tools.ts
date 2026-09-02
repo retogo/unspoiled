@@ -2,10 +2,10 @@ import type { Article, Section } from "./segment";
 import { findEvidence } from "./search";
 import {
   assessSection,
-  assessSentence,
   headingId,
   hiddenHeading,
   hiddenSentence,
+  hiddenSentenceReason,
   isSectionKnown,
   type Policy,
 } from "./risk";
@@ -50,6 +50,7 @@ function sectionSummary(section: Section, policy: Policy) {
     section_id: section.id,
     heading: withheldHeading ? null : section.heading,
     heading_withheld: withheldHeading?.reason,
+    heading_id: withheldHeading ? headingId(section) : undefined,
     risk: known ? "known-to-reader" : assessSection(section).level,
     known_because: known ?? undefined,
     visible_sentences: visible,
@@ -106,7 +107,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "describe_hidden",
       description:
-        "Describe what is being withheld in a section without revealing it: sentence ids, why each was withheld, and how long it is. Use this to reason about the article without learning the spoilers.",
+        "Describe what is being withheld in a section without revealing it: sentence ids, why each was withheld, and how long it is. When the heading itself is withheld it comes back as null with a heading_id you can pass to reveal. Use this to reason about the article without learning the spoilers.",
       inputSchema: {
         type: "object",
         properties: { section_id: { type: "string" } },
@@ -117,11 +118,12 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const article = requireArticle(context);
         const policy = context.policy();
         const section = findSection(article, input.section_id);
+        const withheldHeading = hiddenHeading(section, policy);
         const hidden = [];
         for (const paragraph of section.paragraphs) {
           for (const sentence of paragraph.sentences) {
-            const assessment = assessSentence(sentence, section);
-            if (!hiddenSentence(sentence, section, policy)) continue;
+            const assessment = hiddenSentenceReason(sentence, section, policy);
+            if (!assessment) continue;
             hidden.push({
               sentence_id: sentence.id,
               risk: assessment.level,
@@ -132,8 +134,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         }
         return {
           section_id: section.id,
-          heading: hiddenHeading(section, policy) ? null : section.heading,
-          heading_withheld: hiddenHeading(section, policy)?.reason,
+          heading: withheldHeading ? null : section.heading,
+          heading_withheld: withheldHeading?.reason,
+          heading_id: withheldHeading ? headingId(section) : undefined,
           hidden,
         };
       },
@@ -141,7 +144,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "set_spoiler_policy",
       description:
-        "Set how much of this article the reader is willing to see, and tell the page what they already know. 'strict' withholds narrative and suspect sentences, 'balanced' withholds only confirmed spoilers, 'open' withholds nothing. Fill already_knows from what you know about this particular reader — works they have watched, source novels or manga they have read, seasons they have finished — because a fact they already know is not a spoiler for them. Everything you pass here is displayed on screen for them to correct, so state it plainly rather than guessing.",
+        "Set how much of this article the reader is willing to see, and tell the page what they already know. 'strict' withholds narrative sections and any wording that hints at the ending, 'balanced' withholds narrative sections and only the sentences that state a reveal outright, 'open' withholds nothing at all — including what you withheld yourself. A sentence the reader revealed, or a section they have marked as already known, stays visible at every level. Fill already_knows from what you know about this particular reader — works they have watched, source novels or manga they have read, seasons they have finished — because a fact they already know is not a spoiler for them. Everything you pass here is displayed on screen for them to correct, so state it plainly rather than guessing.",
       inputSchema: {
         type: "object",
         properties: {
@@ -181,7 +184,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "reveal",
       description:
-        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a section's heading id (from heading_withheld) to reveal a withheld heading. The revealed text is shown on their screen and returned here.",
+        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a heading_id from get_article_outline or describe_hidden to reveal a withheld heading. The text is shown on their screen and returned here — which means you have read the spoilers, so every section this opens is listed on screen next to the ones you read with scan_section.",
       inputSchema: {
         type: "object",
         properties: {
@@ -194,19 +197,27 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const article = requireArticle(context);
         const policy = context.policy();
         const ids = (input.sentence_ids as string[]) ?? [];
-        context.setPolicy({ ...policy, revealed: [...new Set([...policy.revealed, ...ids])] });
         const revealed = [];
+        const opened = [];
         for (const section of article.sections) {
+          let readWithheldText = false;
           if (ids.includes(headingId(section))) {
+            readWithheldText = hiddenHeading(section, policy) !== null;
             revealed.push({ sentence_id: headingId(section), text: section.heading });
           }
           for (const paragraph of section.paragraphs) {
             for (const sentence of paragraph.sentences) {
-              if (ids.includes(sentence.id)) revealed.push({ sentence_id: sentence.id, text: sentence.text });
+              if (!ids.includes(sentence.id)) continue;
+              if (hiddenSentence(sentence, section, policy)) readWithheldText = true;
+              revealed.push({ sentence_id: sentence.id, text: sentence.text });
             }
           }
+          if (!readWithheldText) continue;
+          context.markScanned(section.id);
+          opened.push(section.id);
         }
-        return { revealed };
+        context.setPolicy({ ...policy, revealed: [...new Set([...policy.revealed, ...ids])] });
+        return { revealed, listed_on_screen_as_read: opened };
       },
     },
     {
@@ -273,7 +284,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           section_ids: {
             type: "array",
             items: { type: "string" },
-            description: "Withhold every sentence in these sections.",
+            description: "Withhold every sentence in these sections, and their headings with them.",
           },
           because: { type: "string" },
         },
@@ -286,7 +297,10 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const sectionIds = (input.section_ids as string[]) ?? [];
         const fromSections = article.sections
           .filter((section) => sectionIds.includes(section.id))
-          .flatMap((section) => section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((s) => s.id)));
+          .flatMap((section) => [
+            headingId(section),
+            ...section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((s) => s.id)),
+          ]);
         const ids = [...((input.sentence_ids as string[]) ?? []), ...fromSections];
         context.setPolicy({
           ...policy,

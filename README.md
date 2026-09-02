@@ -33,11 +33,14 @@ sentences you are allowed to see, so an answer built from it cannot contain a sp
 not asked to keep a secret — it is never given one.
 
 Headings are withheld too, when the heading is the spoiler: `Series finale` comes back to the agent
-as `null` with a reason, not as text. A summary of a section it cannot name cannot leak the name.
+as `null` with a reason, not as text. A summary of a section it cannot name cannot leak the name. The
+reason never repeats the heading either, so nothing the page says about what it is hiding hands the
+heading back.
 
-The one door that does open, `scan_section`, refuses to return anything unless the caller confirms
-you asked for it, and the sections your agent has read are listed on screen for the rest of the
-session. Consent is a state you can see, not a promise in a prompt.
+Two tools do open a door, and both say so on screen. `scan_section` refuses to return anything
+unless the caller confirms you asked for it. `reveal` hands back the sentences you asked for by name.
+Either way the sections your agent has read are listed on screen for the rest of the session.
+Consent is a state you can see, not a promise in a prompt.
 
 ## Tools
 
@@ -47,7 +50,7 @@ session. Consent is a state you can see, not a promise in a prompt.
 | `get_article_outline` | Sections, risk level, how many sentences are visible and withheld. No article text |
 | `get_safe_text` | One section with withheld sentences replaced by placeholders |
 | `describe_hidden` | What is withheld and why — ids, reasons, lengths, never the text |
-| `set_spoiler_policy` | How much this reader wants to see, plus what they already know |
+| `set_spoiler_policy` | How much this reader wants to see, plus what they already know. `strict` withholds narrative sections and every hint at the ending, `balanced` withholds narrative sections and sentences that state a reveal outright, `open` withholds nothing |
 | `mark_known_sections` | Unhide sections this reader has already lived through, with the reason shown |
 | `withhold` | Withhold what the page's wording rules missed — the agent's judgement, the page's enforcement |
 | `reveal` | Reveal specific sentences, when the reader asks for them |

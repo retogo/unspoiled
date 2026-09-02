@@ -65,7 +65,6 @@ describe("assessSection with ancestor headings", () => {
     const setting = result[1];
     expect(setting.heading).toBe("Setting");
     expect(assessSection(setting).level).toBe("spoiler");
-    expect(assessSection(setting).reason).toContain("Synopsis");
   });
 
   it("leaves a subsection safe when no ancestor heading is narrative", () => {

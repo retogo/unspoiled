@@ -7,6 +7,7 @@ function section(id: string, heading: string, sentences: string[]): Section {
   return {
     id,
     heading,
+    headingPath: [heading],
     level: 2,
     paragraphs: [
       {
