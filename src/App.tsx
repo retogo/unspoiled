@@ -84,7 +84,7 @@ export default function App() {
   openArticleRef.current = openArticle;
 
   useEffect(() => {
-    const state = registerTools(
+    const registration = registerTools(
       buildTools({
         article: () => articleRef.current,
         policy: () => policyRef.current,
@@ -102,7 +102,8 @@ export default function App() {
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
-    setRegistration(state);
+    void registration.ready.then(setRegistration);
+    return () => registration.unregister();
   }, []);
 
   useEffect(() => {
@@ -160,12 +161,18 @@ export default function App() {
           <p className="text-sm text-zinc-500">Read Wikipedia without learning the ending.</p>
           <span
             className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
-              registration.api === "unavailable" ? "bg-zinc-100 text-zinc-500" : "bg-emerald-50 text-emerald-700"
+              registration.api === "unavailable"
+                ? "bg-zinc-100 text-zinc-500"
+                : registration.error
+                  ? "bg-amber-50 text-amber-900"
+                  : "bg-emerald-50 text-emerald-700"
             }`}
           >
             {registration.api === "unavailable"
               ? "No agent connected — reading on your own"
-              : `${registration.toolCount} tools exposed via ${registration.api}`}
+              : registration.error
+                ? `This page could not expose its tools — ${registration.error}`
+                : `${registration.toolCount} tools exposed via ${registration.api}`}
           </span>
         </div>
       </header>

@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { fetchArticle, type FetchedArticle, type Lang } from "./lib/wikipedia";
@@ -13,7 +14,7 @@ type WebMcpTool = {
   execute: (raw: unknown) => Promise<{ content: { type: string; text: string }[] }>;
 };
 
-function installAgent() {
+function installAgent(holder: object = document) {
   const registered: WebMcpTool[] = [];
   const context = {
     registerTool: vi.fn((tool: WebMcpTool) => {
@@ -26,8 +27,26 @@ function installAgent() {
       return Promise.resolve();
     }),
   };
-  Object.defineProperty(document, "modelContext", { value: context, configurable: true, writable: true });
+  Object.defineProperty(holder, "modelContext", { value: context, configurable: true, writable: true });
   return { registered, context };
+}
+
+function installFailingAgent(error: Error) {
+  Object.defineProperty(document, "modelContext", {
+    value: {
+      registerTool: () => Promise.reject(error),
+      unregisterTool: () => Promise.resolve(),
+    },
+    configurable: true,
+    writable: true,
+  });
+}
+
+async function renderWithAgent(): Promise<WebMcpTool[]> {
+  const { registered } = installAgent();
+  render(<App />);
+  await waitFor(() => expect(registered.length).toBeGreaterThan(0));
+  return registered;
 }
 
 function toolNamed(registered: WebMcpTool[], name: string): WebMcpTool {
@@ -108,12 +127,12 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(document, "modelContext");
+  Reflect.deleteProperty(navigator, "modelContext");
 });
 
 describe("opening another article", () => {
   it("does not carry the sections the reader knew over to the new article", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "mark_known_sections", {
@@ -129,8 +148,7 @@ describe("opening another article", () => {
   });
 
   it("does not let sentences withheld in one article hide sentences in the next", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "withhold", {
@@ -145,8 +163,7 @@ describe("opening another article", () => {
   });
 
   it("forgets what the agent said the reader already knows", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "set_spoiler_policy", {
@@ -161,8 +178,7 @@ describe("opening another article", () => {
   });
 
   it("keeps the reader's policy level, which belongs to the reader and not the article", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "set_spoiler_policy", { level: "balanced" });
@@ -174,8 +190,7 @@ describe("opening another article", () => {
   });
 
   it("keeps what the reader has opened when the same article is opened again", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "reveal", { sentence_ids: ["p2.0"] });
@@ -195,10 +210,54 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+describe("exposing the tools to an agent", () => {
+  it("takes its tools back when the reader leaves the page", async () => {
+    const { registered, context } = installAgent();
+    const view = render(<App />);
+    await waitFor(() => expect(registered.length).toBeGreaterThan(0));
+    const exposed = registered.length;
+
+    view.unmount();
+
+    await waitFor(() => expect(registered).toHaveLength(0));
+    expect(context.unregisterTool).toHaveBeenCalledTimes(exposed);
+  });
+
+  it("exposes each tool once when React mounts the page twice", async () => {
+    const { registered } = installAgent();
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(registered.length).toBeGreaterThan(0));
+    const names = registered.map((tool) => tool.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("tells the reader when the browser refused the tools", async () => {
+    installFailingAgent(new Error("Tool limit reached"));
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText(/Tool limit reached/)).toBeTruthy());
+    expect(screen.queryByText(/tools exposed via/)).toBeNull();
+  });
+
+  it("names the holder the tools were actually registered on", async () => {
+    installAgent(navigator);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByText(/tools exposed via navigator.modelContext/)).toBeTruthy());
+  });
+});
+
 describe("open_article", () => {
   it("returns the article it opened, once the fetch has finished", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     const result = await callTool(registered, "open_article", { title: "Attack on Titan" });
 
@@ -209,8 +268,7 @@ describe("open_article", () => {
   });
 
   it("reports a title that does not exist instead of a successful open", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     const result = await callTool(registered, "open_article", { title: "Nonexistent Film" });
 
@@ -219,8 +277,7 @@ describe("open_article", () => {
   });
 
   it("has the article in place for the tools that follow it", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await callTool(registered, "open_article", { title: "Attack on Titan" });
     await callTool(registered, "open_article", { title: "The Sixth Sense" });
@@ -230,8 +287,7 @@ describe("open_article", () => {
   });
 
   it("describes the new article under the policy that now applies to it", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await callTool(registered, "open_article", { title: "Attack on Titan" });
     await callTool(registered, "mark_known_sections", { section_ids: ["s2"], because: "finished season 1" });
@@ -243,8 +299,7 @@ describe("open_article", () => {
   });
 
   it("lets the last request win when an earlier fetch finishes after it", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
     const titan = deferred<FetchedArticle>();
     const sixthSense = deferred<FetchedArticle>();
     vi.mocked(fetchArticle)
@@ -271,8 +326,7 @@ describe("open_article", () => {
 
 describe("the record of what the agent has read", () => {
   it("survives opening the same article again", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
@@ -286,8 +340,7 @@ describe("the record of what the agent has read", () => {
   });
 
   it("comes back when the reader returns to the article", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
@@ -300,8 +353,7 @@ describe("the record of what the agent has read", () => {
   });
 
   it("does not report another article's sections as read in this one", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
@@ -313,8 +365,7 @@ describe("the record of what the agent has read", () => {
   });
 
   it("still tells the reader the agent read another article, without naming the heading", async () => {
-    const { registered } = installAgent();
-    render(<App />);
+    const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
