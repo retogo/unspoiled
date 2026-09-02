@@ -55,6 +55,7 @@ describe("heading paths", () => {
     expect(result[0].headingPath).toEqual(["(lead)"]);
   });
 });
+
 describe("assessSection with ancestor headings", () => {
   it("treats a subsection of a narrative section as a spoiler", () => {
     const result = sections(
