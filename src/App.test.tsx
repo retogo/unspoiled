@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -68,6 +69,14 @@ async function openArticle(registered: WebMcpTool[], language: Lang, title: stri
   const result = await callTool(registered, "open_article", { title, language });
   await waitFor(() => screen.getByRole("heading", { level: 2, name: title }));
   return result;
+}
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
 }
 
 function fetched(lang: Lang, title: string, html: string): FetchedArticle {
@@ -201,14 +210,6 @@ describe("opening another article", () => {
     expect(screen.getByText(/Eren Yeager lives in a walled town/)).toBeTruthy();
   });
 });
-
-function deferred<T>() {
-  let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((settle) => {
-    resolve = settle;
-  });
-  return { promise, resolve };
-}
 
 describe("exposing the tools to an agent", () => {
   it("takes its tools back when the reader leaves the page", async () => {
@@ -375,5 +376,72 @@ describe("the record of what the agent has read", () => {
     const panel = screen.getByText("Your agent has read").parentElement;
     expect(panel?.textContent).toContain("Attack on Titan — 1 section");
     expect(panel?.textContent).not.toContain("Plot");
+  });
+});
+
+describe("a shared link", () => {
+  it("does not override the level the reader has stored", async () => {
+    window.localStorage.setItem("unspoiled.level", "strict");
+    window.history.replaceState(null, "", "/?level=open&title=Attack%20on%20Titan");
+
+    const registered = await renderWithAgent();
+    await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
+
+    const outline = await callTool(registered, "get_article_outline");
+    expect(outline.policy_level).toBe("strict");
+    expect(screen.queryByText(/Eren Yeager lives in a walled town/)).toBeNull();
+  });
+
+  it("does not turn its level into the reader's stored setting", async () => {
+    window.history.replaceState(null, "", "/?level=open");
+
+    await renderWithAgent();
+
+    expect(window.localStorage.getItem("unspoiled.level")).toBeNull();
+  });
+
+  it("sets the level for a reader who has none stored", async () => {
+    window.history.replaceState(null, "", "/?level=balanced&title=Attack%20on%20Titan");
+
+    const registered = await renderWithAgent();
+    await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
+
+    const outline = await callTool(registered, "get_article_outline");
+    expect(outline.policy_level).toBe("balanced");
+  });
+
+  it("cannot choose which host the article is fetched from", async () => {
+    window.history.replaceState(null, "", "/?lang=xx&title=Attack%20on%20Titan");
+
+    await renderWithAgent();
+
+    await waitFor(() => expect(vi.mocked(fetchArticle)).toHaveBeenCalledWith("en", "Attack on Titan"));
+    expect(vi.mocked(fetchArticle)).not.toHaveBeenCalledWith("xx", "Attack on Titan");
+  });
+
+  it("still opens the article it points at", async () => {
+    window.history.replaceState(null, "", `/?lang=ja&title=${encodeURIComponent("シックス・センス")}`);
+
+    await renderWithAgent();
+
+    await waitFor(() => screen.getByRole("heading", { level: 2, name: "シックス・センス" }));
+  });
+});
+
+describe("the reader's level", () => {
+  it("is stored when the reader picks it", async () => {
+    await renderWithAgent();
+
+    await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
+
+    expect(window.localStorage.getItem("unspoiled.level")).toBe("balanced");
+  });
+
+  it("is stored when the agent sets it", async () => {
+    const registered = await renderWithAgent();
+
+    await callTool(registered, "set_spoiler_policy", { level: "open" });
+
+    expect(window.localStorage.getItem("unspoiled.level")).toBe("open");
   });
 });

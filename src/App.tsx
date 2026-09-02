@@ -3,7 +3,6 @@ import {
   assessSection,
   assessSentence,
   countHidden,
-  defaultPolicy,
   headingId,
   hiddenHeading,
   hiddenSentence,
@@ -14,6 +13,7 @@ import { segmentArticle, sectionHeading, type Article, type Paragraph, type Sect
 import {
   articleKey,
   policyForOpened,
+  readSessionStart,
   scannedElsewhere,
   scannedForArticle,
   type ScannedSection,
@@ -29,6 +29,8 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
   { lang: "ja", title: "シックス・センス", note: "日本語版でも同じことが起きる" },
 ];
 
+const LEVEL_KEY = "unspoiled.level";
+
 const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] = [
   { level: "strict", label: "Strict", hint: "Withhold narrative and anything suspicious" },
   { level: "balanced", label: "Balanced", hint: "Withhold confirmed spoilers only" },
@@ -36,11 +38,12 @@ const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] =
 ];
 
 export default function App() {
-  const [lang, setLang] = useState<Lang>("en");
+  const [start] = useState(() => readSessionStart(window.location.search, window.localStorage.getItem(LEVEL_KEY)));
+  const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
   const [term, setTerm] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [article, setArticle] = useState<Article | null>(null);
-  const [policy, setPolicy] = useState<Policy>(defaultPolicy);
+  const [policy, setPolicy] = useState<Policy>(start.policy);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
@@ -88,7 +91,10 @@ export default function App() {
       buildTools({
         article: () => articleRef.current,
         policy: () => policyRef.current,
-        setPolicy: (next) => setPolicy(next),
+        setPolicy: (next) => {
+          if (next.level !== policyRef.current.level) window.localStorage.setItem(LEVEL_KEY, next.level);
+          setPolicy(next);
+        },
         openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
         markScanned: (open, sectionId) => {
@@ -107,17 +113,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sharedTitle = params.get("title");
-    const sharedLevel = params.get("level") as Policy["level"] | null;
-    const storedLevel = window.localStorage.getItem("unspoiled.level") as Policy["level"] | null;
-    const level = sharedLevel ?? storedLevel;
-    if (level) setPolicy((current) => ({ ...current, level }));
-    if (sharedTitle) void openArticle((params.get("lang") as Lang) ?? "en", sharedTitle);
-  }, [openArticle]);
+    if (start.article) void openArticleRef.current(start.article.lang, start.article.title);
+  }, [start]);
 
   useEffect(() => {
-    window.localStorage.setItem("unspoiled.level", policy.level);
     const params = new URLSearchParams();
     params.set("level", policy.level);
     if (article) {
@@ -149,6 +148,12 @@ export default function App() {
   }, [article, scanned]);
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
+
+  /** Only a level the reader or their agent chose is remembered; one that arrived in a link is not. */
+  const chooseLevel = useCallback((level: Policy["level"]) => {
+    window.localStorage.setItem(LEVEL_KEY, level);
+    setPolicy((current) => ({ ...current, level }));
+  }, []);
 
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: [...new Set([...current.revealed, ...sentenceIds])] }));
@@ -260,7 +265,7 @@ export default function App() {
               {POLICY_LEVELS.map((option) => (
                 <button
                   key={option.level}
-                  onClick={() => setPolicy((current) => ({ ...current, level: option.level }))}
+                  onClick={() => chooseLevel(option.level)}
                   className={`block w-full rounded-lg border px-3 py-2 text-left ${
                     policy.level === option.level
                       ? "border-ink bg-white font-medium"
