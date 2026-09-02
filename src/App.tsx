@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   assessSection,
-  assessSentence,
   countHidden,
   defaultPolicy,
   headingId,
   hiddenHeading,
-  hiddenSentence,
+  hiddenSentenceReason,
   isSectionKnown,
   type Policy,
 } from "./lib/risk";
@@ -24,8 +23,8 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 
 const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] = [
   { level: "strict", label: "Strict", hint: "Withhold narrative and anything suspicious" },
-  { level: "balanced", label: "Balanced", hint: "Withhold confirmed spoilers only" },
-  { level: "open", label: "Open", hint: "Show everything" },
+  { level: "balanced", label: "Balanced", hint: "Withhold plot sections and outright reveals" },
+  { level: "open", label: "Open", hint: "Show everything, your agent's withholding included" },
 ];
 
 export default function App() {
@@ -262,9 +261,7 @@ export default function App() {
             <section>
               <h3 className="font-semibold">Your agent has read</h3>
               <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
-                {scanned
-                  .map((id) => article?.sections.find((section) => section.id === id)?.heading ?? id)
-                  .join(", ")}
+                {scanned.map((id) => scannedLabel(article, policy, id)).join(", ")}
                 . It knows those spoilers for the rest of this conversation.
               </p>
             </section>
@@ -413,21 +410,28 @@ function SectionHeading({
 type SentenceRun = {
   key: string;
   hidden: boolean;
-  reason: string;
+  reason?: string;
   sentences: { id: string; text: string }[];
 };
 
 function groupSentences(paragraph: Paragraph, section: Section, policy: Policy): SentenceRun[] {
   const runs: SentenceRun[] = [];
   for (const sentence of paragraph.sentences) {
-    const assessment = assessSentence(sentence, section);
-    const hidden = hiddenSentence(sentence, section, policy);
+    const withheld = hiddenSentenceReason(sentence, section, policy);
+    const hidden = withheld !== null;
     const last = runs[runs.length - 1];
     if (last && last.hidden === hidden) {
       last.sentences.push(sentence);
       continue;
     }
-    runs.push({ key: sentence.id, hidden, reason: assessment.reason, sentences: [sentence] });
+    runs.push({ key: sentence.id, hidden, reason: withheld?.reason, sentences: [sentence] });
   }
   return runs;
+}
+
+/** A section the agent has read can still be one the reader is not allowed to see the name of. */
+function scannedLabel(article: Article | null, policy: Policy, sectionId: string): string {
+  const section = article?.sections.find((candidate) => candidate.id === sectionId);
+  if (!section) return sectionId;
+  return hiddenHeading(section, policy) ? "a section whose heading is withheld" : sectionHeading(section);
 }
