@@ -1,5 +1,5 @@
 import type { Article, Section, Sentence } from "./segment";
-import { isLead, sectionHeading } from "./segment";
+import { isLead } from "./segment";
 
 export type RiskLevel = "safe" | "suspect" | "spoiler";
 
@@ -8,37 +8,49 @@ export type Assessment = {
   reason: string;
 };
 
-const NARRATIVE_SECTIONS =
-  /^(plot|synopsis|story|storyline|plot summary|summary|ending|episodes?|episode list|characters?|あらすじ|ストーリー|物語|各話|エピソード|結末|登場人物)/i;
+const HEADING_TAIL = String.raw`(?:\s*[([:：（〔・\-–—/].*)?$`;
 
-const ANALYSIS_SECTIONS =
-  /^(themes?|analysis|interpretation|symbolism|meaning|influences?|テーマ|考察|解釈|作品分析)/i;
+function headingRule(alternatives: string): RegExp {
+  return new RegExp(`^(?:${alternatives})(?:一覧)?${HEADING_TAIL}`, "i");
+}
 
-const META_SECTIONS =
-  /^(production|development|casting|filming|music|release|home media|reception|box office|critical response|accolades|awards|legacy|references|external links|see also|製作|制作|公開|評価|受賞|脚注|関連項目|外部リンク|キャスト)/i;
+const NARRATIVE_SECTIONS = headingRule(
+  "plot|plot summary|synopsis|story|storyline|summary|ending|endings|episodes?|episode list|list of episodes|characters?|character list|あらすじ|ストーリー|物語|各話|各話あらすじ|エピソード|結末|登場人物",
+);
 
-const REVEAL_MARKERS =
-  /\btwist|\breveal|\bbetray|\bresurrect|\bactually\b|\bturns out\b|\bin the end\b|\bfinale\b|\bfinal (scene|episode|act)\b|\bdies\b|\bdeath of\b|\bis killed\b|\bthe killer\b|\bmurderer\b|\bending\b|\bclimax\b|\bepilogue\b|実は|正体|結末|最終回|最後に|死ぬ|殺され|裏切/i
+const ANALYSIS_SECTIONS = headingRule(
+  "themes?|analysis|interpretations?|symbolism|meaning|influences?|テーマ|考察|解釈|作品分析",
+);
+
+const META_SECTIONS = headingRule(
+  "production|development|casting|filming|music|soundtrack|release|home media|reception|box office|critical response|critical reception|accolades|awards|legacy|references|external links|see also|製作|制作|公開|評価|受賞|脚注|関連項目|外部リンク|キャスト|主題歌",
+);
+
+const STRONG_REVEAL_MARKERS =
+  /\btwists?\b|\bturns out\b|\bis revealed (to|as|that)\b|\breveals that\b|\brevealed that\b|\bis actually\b|\bwas actually\b|\bthe killer\b|\bthe murderer\b|\bthe culprit\b|\bfinal (scene|episode|act|twist)\b|\bdies\b|\bis killed\b|\bkills (himself|herself)\b|\bcommits suicide\b|実は|正体|真犯人|自殺|殺され|裏切/i;
+
+const WEAK_REVEAL_MARKERS =
+  /\breveal|\bbetray|\bresurrect|\bin the end\b|\bfinale\b|\bdeath of\b|\bfate of\b|\bending\b|\bclimax\b|\bepilogue\b|結末|最終回|最終話|死ぬ|死亡/i;
 
 export function assessSection(section: Section): Assessment {
   if (NARRATIVE_SECTIONS.test(section.heading)) {
-    return { level: "spoiler", reason: `narrative section "${section.heading}"` };
+    return { level: "spoiler", reason: "plot summaries state the ending" };
   }
   if (ANALYSIS_SECTIONS.test(section.heading)) {
-    return { level: "spoiler", reason: `analysis section "${section.heading}" discusses the ending` };
+    return { level: "spoiler", reason: "analysis sections discuss the ending" };
   }
   if (isLead(section)) {
     return { level: "safe", reason: "lead section, checked sentence by sentence" };
   }
   if (META_SECTIONS.test(section.heading)) {
-    return { level: "safe", reason: `production/publication section "${section.heading}"` };
+    return { level: "safe", reason: "a production or publication section" };
   }
-  return { level: "safe", reason: `section "${section.heading}", checked sentence by sentence` };
+  return { level: "safe", reason: "checked sentence by sentence" };
 }
 
 export function assessHeading(section: Section): Assessment | null {
   if (isLead(section)) return null;
-  if (REVEAL_MARKERS.test(section.heading)) {
+  if (STRONG_REVEAL_MARKERS.test(section.heading) || WEAK_REVEAL_MARKERS.test(section.heading)) {
     return { level: "spoiler", reason: "the heading itself names the reveal" };
   }
   return null;
@@ -53,8 +65,11 @@ export function assessSentence(sentence: Sentence, section: Section): Assessment
   if (sectionAssessment.level === "spoiler") {
     return sectionAssessment;
   }
-  if (REVEAL_MARKERS.test(sentence.text)) {
-    return { level: "suspect", reason: `reveal wording inside "${sectionHeading(section)}"` };
+  if (STRONG_REVEAL_MARKERS.test(sentence.text)) {
+    return { level: "spoiler", reason: "a sentence that states the reveal outright" };
+  }
+  if (WEAK_REVEAL_MARKERS.test(sentence.text)) {
+    return { level: "suspect", reason: "wording that hints at the ending" };
   }
   return { level: "safe", reason: sectionAssessment.reason };
 }
@@ -77,10 +92,13 @@ export const defaultPolicy: Policy = {
   notes: "",
 };
 
-export function isHidden(assessment: Assessment, policy: Policy, sentenceId: string): boolean {
-  if (policy.revealed.includes(sentenceId)) return false;
-  if (policy.level === "open") return false;
-  if (policy.level === "balanced") return assessment.level === "spoiler";
+const WITHHELD_BY_AGENT: Assessment = {
+  level: "spoiler",
+  reason: "withheld at your agent's request",
+};
+
+function hiddenByLevel(assessment: Assessment, level: Policy["level"]): boolean {
+  if (level === "balanced") return assessment.level === "spoiler";
   return assessment.level !== "safe";
 }
 
@@ -88,20 +106,28 @@ export function isSectionKnown(policy: Policy, sectionId: string): string | null
   return policy.knownSections.find((known) => known.sectionId === sectionId)?.because ?? null;
 }
 
+function shownRegardless(policy: Policy, id: string, sectionId: string): boolean {
+  if (policy.level === "open") return true;
+  if (policy.revealed.includes(id)) return true;
+  return isSectionKnown(policy, sectionId) !== null;
+}
+
+export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
+  if (shownRegardless(policy, sentence.id, section.id)) return null;
+  if (policy.withheld.includes(sentence.id)) return WITHHELD_BY_AGENT;
+  const assessment = assessSentence(sentence, section);
+  return hiddenByLevel(assessment, policy.level) ? assessment : null;
+}
+
 export function hiddenSentence(sentence: Sentence, section: Section, policy: Policy): boolean {
-  if (policy.revealed.includes(sentence.id)) return false;
-  if (policy.withheld.includes(sentence.id)) return true;
-  if (isSectionKnown(policy, section.id)) return false;
-  return isHidden(assessSentence(sentence, section), policy, sentence.id);
+  return hiddenSentenceReason(sentence, section, policy) !== null;
 }
 
 export function hiddenHeading(section: Section, policy: Policy): Assessment | null {
-  const assessment = assessHeading(section);
-  if (!assessment) return null;
-  if (policy.level === "open") return null;
-  if (policy.revealed.includes(headingId(section))) return null;
-  if (isSectionKnown(policy, section.id)) return null;
-  return assessment;
+  const id = headingId(section);
+  if (shownRegardless(policy, id, section.id)) return null;
+  if (policy.withheld.includes(id)) return WITHHELD_BY_AGENT;
+  return assessHeading(section);
 }
 
 export function countHidden(article: Article, policy: Policy): { hidden: number; total: number } {
