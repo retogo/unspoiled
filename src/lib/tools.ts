@@ -18,7 +18,7 @@ export type ToolContext = {
   setPolicy: (next: Policy) => void;
   openArticle: (lang: Lang, title: string) => void;
   scanned: () => string[];
-  markScanned: (sectionId: string) => void;
+  markScanned: (article: Article, sectionId: string) => void;
 };
 
 const noInput = { type: "object", properties: {}, additionalProperties: false };
@@ -382,7 +382,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
               "Withheld text is not returned without acknowledge=true. Ask the reader whether they want the spoilers first.",
           };
         }
-        context.markScanned(section.id);
+        context.markScanned(article, section.id);
         return {
           section_id: section.id,
           heading: section.heading,

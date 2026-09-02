@@ -11,6 +11,13 @@ import {
   type Policy,
 } from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
+import {
+  articleKey,
+  policyForOpened,
+  scannedElsewhere,
+  scannedForArticle,
+  type ScannedSection,
+} from "./lib/session";
 import { buildTools } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
 import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
@@ -38,11 +45,11 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
-  const [scanned, setScanned] = useState<string[]>([]);
+  const [scanned, setScanned] = useState<ScannedSection[]>([]);
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
-  const scannedRef = useRef<string[]>(scanned);
+  const scannedRef = useRef<ScannedSection[]>(scanned);
   articleRef.current = article;
   policyRef.current = policy;
   scannedRef.current = scanned;
@@ -54,9 +61,9 @@ export default function App() {
     setHits([]);
     try {
       const fetched = await fetchArticle(nextLang, title);
-      setArticle(segmentArticle(fetched));
-      setPolicy((current) => ({ ...current, revealed: [] }));
-      setScanned([]);
+      const opened = segmentArticle(fetched);
+      setArticle(opened);
+      setPolicy(policyForOpened(policyRef.current, articleRef.current, opened));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -74,9 +81,15 @@ export default function App() {
         policy: () => policyRef.current,
         setPolicy: (next) => setPolicy(next),
         openArticle: (toolLang, title) => void openArticleRef.current(toolLang, title),
-        scanned: () => scannedRef.current,
-        markScanned: (sectionId) =>
-          setScanned((current) => (current.includes(sectionId) ? current : [...current, sectionId])),
+        scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
+        markScanned: (open, sectionId) => {
+          const key = articleKey(open.lang, open.title);
+          setScanned((current) =>
+            current.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)
+              ? current
+              : [...current, { articleKey: key, articleTitle: open.displayTitle, sectionId }],
+          );
+        },
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
@@ -118,6 +131,14 @@ export default function App() {
   }, [lang, term]);
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
+
+  const scannedHeadings = useMemo(() => {
+    if (!article) return [];
+    const ids = scannedForArticle(scanned, article);
+    return article.sections.filter((section) => ids.includes(section.id)).map((section) => section.heading);
+  }, [article, scanned]);
+
+  const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
 
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: [...new Set([...current.revealed, ...sentenceIds])] }));
@@ -261,12 +282,20 @@ export default function App() {
           {scanned.length > 0 && (
             <section>
               <h3 className="font-semibold">Your agent has read</h3>
-              <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
-                {scanned
-                  .map((id) => article?.sections.find((section) => section.id === id)?.heading ?? id)
-                  .join(", ")}
-                . It knows those spoilers for the rest of this conversation.
-              </p>
+              {scannedHeadings.length > 0 && (
+                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                  {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
+                </p>
+              )}
+              {elsewhere.length > 0 && (
+                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
+                  {elsewhere.map((group) => (
+                    <li key={group.articleTitle}>
+                      {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
 
