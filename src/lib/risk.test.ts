@@ -168,3 +168,18 @@ describe("what overrides what", () => {
     expect(hiddenHeading(plot, defaultPolicy)).toBeNull();
   });
 });
+
+describe("wording that reads like a reveal but is not", () => {
+  it.each([
+    "Garofalo revealed that she did accept the role, but was dropped from the cast.",
+    "Fincher revealed that the studio had asked for a softer ending.",
+  ])("treats %s as a hint at most", (text) => {
+    const target = section("Casting", [text]);
+    expect(assessSentence(firstSentence(target), target).level).toBe("suspect");
+  });
+
+  it("still catches the passive reveal a plot summary uses", () => {
+    const target = section("Reception", ["It is revealed that the narrator has been alone the whole time."]);
+    expect(assessSentence(firstSentence(target), target).level).toBe("spoiler");
+  });
+});

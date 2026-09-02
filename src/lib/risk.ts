@@ -27,7 +27,7 @@ const META_SECTIONS = headingRule(
 );
 
 const STRONG_REVEAL_MARKERS =
-  /\btwists?\b|\bturns out\b|\bis revealed (to|as|that)\b|\breveals that\b|\brevealed that\b|\bis actually\b|\bwas actually\b|\bthe killer\b|\bthe murderer\b|\bthe culprit\b|\bfinal (scene|episode|act|twist)\b|\bdies\b|\bis killed\b|\bkills (himself|herself)\b|\bcommits suicide\b|実は|正体|真犯人|自殺|殺され|裏切/i;
+  /\btwists?\b|\bturns out\b|\bis revealed (to|as|that)\b|\bis actually\b|\bwas actually\b|\bthe killer\b|\bthe murderer\b|\bthe culprit\b|\bfinal (scene|episode|act|twist)\b|\bdies\b|\bis killed\b|\bkills (himself|herself)\b|\bcommits suicide\b|実は|正体|真犯人|自殺|殺され|裏切/i;
 
 const WEAK_REVEAL_MARKERS =
   /\breveal|\bbetray|\bresurrect|\bin the end\b|\bfinale\b|\bdeath of\b|\bfate of\b|\bending\b|\bclimax\b|\bepilogue\b|結末|最終回|最終話|死ぬ|死亡/i;
