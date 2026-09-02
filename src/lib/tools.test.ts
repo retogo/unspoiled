@@ -64,9 +64,9 @@ function harness() {
     setPolicy: (next) => {
       policy = next;
     },
-    openArticle: () => {},
+    openArticle: () => Promise.resolve({ status: "opened", article, policy }),
     scanned: () => scanned,
-    markScanned: (sectionId) => {
+    markScanned: (_article, sectionId) => {
       if (!scanned.includes(sectionId)) scanned.push(sectionId);
     },
   });

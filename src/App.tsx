@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   assessSection,
   countHidden,
-  defaultPolicy,
   headingId,
   hiddenHeading,
   hiddenSentenceReason,
@@ -10,7 +9,15 @@ import {
   type Policy,
 } from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
-import { buildTools } from "./lib/tools";
+import {
+  articleKey,
+  policyForOpened,
+  readSessionStart,
+  scannedElsewhere,
+  scannedForArticle,
+  type ScannedSection,
+} from "./lib/session";
+import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
 import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
 
@@ -21,6 +28,8 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
   { lang: "ja", title: "シックス・センス", note: "日本語版でも同じことが起きる" },
 ];
 
+const LEVEL_KEY = "unspoiled.level";
+
 const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] = [
   { level: "strict", label: "Strict", hint: "Withhold narrative and anything suspicious" },
   { level: "balanced", label: "Balanced", hint: "Withhold plot sections and outright reveals" },
@@ -28,38 +37,48 @@ const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] =
 ];
 
 export default function App() {
-  const [lang, setLang] = useState<Lang>("en");
+  const [start] = useState(() => readSessionStart(window.location.search, window.localStorage.getItem(LEVEL_KEY)));
+  const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
   const [term, setTerm] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [article, setArticle] = useState<Article | null>(null);
-  const [policy, setPolicy] = useState<Policy>(defaultPolicy);
+  const [policy, setPolicy] = useState<Policy>(start.policy);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
-  const [scanned, setScanned] = useState<string[]>([]);
+  const [scanned, setScanned] = useState<ScannedSection[]>([]);
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
-  const scannedRef = useRef<string[]>(scanned);
+  const scannedRef = useRef<ScannedSection[]>(scanned);
+  const openRequestRef = useRef(0);
   articleRef.current = article;
   policyRef.current = policy;
   scannedRef.current = scanned;
 
-  const openArticle = useCallback(async (nextLang: Lang, title: string) => {
+  const openArticle = useCallback(async (nextLang: Lang, title: string): Promise<OpenResult> => {
+    const request = openRequestRef.current + 1;
+    openRequestRef.current = request;
     setLang(nextLang);
     setLoading(true);
     setError(null);
     setHits([]);
     try {
       const fetched = await fetchArticle(nextLang, title);
-      setArticle(segmentArticle(fetched));
-      setPolicy((current) => ({ ...current, revealed: [] }));
-      setScanned([]);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
+      if (openRequestRef.current !== request) return { status: "superseded" };
+      const opened = segmentArticle(fetched);
+      const opening = policyForOpened(policyRef.current, articleRef.current, opened);
+      setArticle(opened);
+      setPolicy(opening);
       setLoading(false);
+      return { status: "opened", article: opened, policy: opening };
+    } catch (cause) {
+      if (openRequestRef.current !== request) return { status: "superseded" };
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      setLoading(false);
+      return { status: "failed", error: message };
     }
   }, []);
 
@@ -67,33 +86,36 @@ export default function App() {
   openArticleRef.current = openArticle;
 
   useEffect(() => {
-    const state = registerTools(
+    const registration = registerTools(
       buildTools({
         article: () => articleRef.current,
         policy: () => policyRef.current,
-        setPolicy: (next) => setPolicy(next),
-        openArticle: (toolLang, title) => void openArticleRef.current(toolLang, title),
-        scanned: () => scannedRef.current,
-        markScanned: (sectionId) =>
-          setScanned((current) => (current.includes(sectionId) ? current : [...current, sectionId])),
+        setPolicy: (next) => {
+          if (next.level !== policyRef.current.level) window.localStorage.setItem(LEVEL_KEY, next.level);
+          setPolicy(next);
+        },
+        openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
+        scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
+        markScanned: (open, sectionId) => {
+          const key = articleKey(open.lang, open.title);
+          setScanned((current) =>
+            current.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)
+              ? current
+              : [...current, { articleKey: key, articleTitle: open.displayTitle, sectionId }],
+          );
+        },
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
-    setRegistration(state);
+    void registration.ready.then(setRegistration);
+    return () => registration.unregister();
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sharedTitle = params.get("title");
-    const sharedLevel = params.get("level") as Policy["level"] | null;
-    const storedLevel = window.localStorage.getItem("unspoiled.level") as Policy["level"] | null;
-    const level = sharedLevel ?? storedLevel;
-    if (level) setPolicy((current) => ({ ...current, level }));
-    if (sharedTitle) void openArticle((params.get("lang") as Lang) ?? "en", sharedTitle);
-  }, [openArticle]);
+    if (start.article) void openArticleRef.current(start.article.lang, start.article.title);
+  }, [start]);
 
   useEffect(() => {
-    window.localStorage.setItem("unspoiled.level", policy.level);
     const params = new URLSearchParams();
     params.set("level", policy.level);
     if (article) {
@@ -118,6 +140,22 @@ export default function App() {
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
 
+  const scannedHeadings = useMemo(() => {
+    if (!article) return [];
+    const ids = scannedForArticle(scanned, article);
+    return article.sections
+      .filter((section) => ids.includes(section.id))
+      .map((section) => (hiddenHeading(section, policy) ? "a section whose heading is withheld" : sectionHeading(section)));
+  }, [article, policy, scanned]);
+
+  const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
+
+  /** Only a level the reader or their agent chose is remembered; one that arrived in a link is not. */
+  const chooseLevel = useCallback((level: Policy["level"]) => {
+    window.localStorage.setItem(LEVEL_KEY, level);
+    setPolicy((current) => ({ ...current, level }));
+  }, []);
+
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: [...new Set([...current.revealed, ...sentenceIds])] }));
 
@@ -129,12 +167,18 @@ export default function App() {
           <p className="text-sm text-zinc-500">Read Wikipedia without learning the ending.</p>
           <span
             className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
-              registration.api === "unavailable" ? "bg-zinc-100 text-zinc-500" : "bg-emerald-50 text-emerald-700"
+              registration.api === "unavailable"
+                ? "bg-zinc-100 text-zinc-500"
+                : registration.error
+                  ? "bg-amber-50 text-amber-900"
+                  : "bg-emerald-50 text-emerald-700"
             }`}
           >
             {registration.api === "unavailable"
               ? "No agent connected — reading on your own"
-              : `${registration.toolCount} tools exposed via ${registration.api}`}
+              : registration.error
+                ? `This page could not expose its tools — ${registration.error}`
+                : `${registration.toolCount} tools exposed via ${registration.api}`}
           </span>
         </div>
       </header>
@@ -224,7 +268,7 @@ export default function App() {
               {POLICY_LEVELS.map((option) => (
                 <button
                   key={option.level}
-                  onClick={() => setPolicy((current) => ({ ...current, level: option.level }))}
+                  onClick={() => chooseLevel(option.level)}
                   className={`block w-full rounded-lg border px-3 py-2 text-left ${
                     policy.level === option.level
                       ? "border-ink bg-white font-medium"
@@ -262,10 +306,20 @@ export default function App() {
           {scanned.length > 0 && (
             <section>
               <h3 className="font-semibold">Your agent has read</h3>
-              <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
-                {scanned.map((id) => scannedLabel(article, policy, id)).join(", ")}
-                . It knows those spoilers for the rest of this conversation.
-              </p>
+              {scannedHeadings.length > 0 && (
+                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                  {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
+                </p>
+              )}
+              {elsewhere.length > 0 && (
+                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
+                  {elsewhere.map((group) => (
+                    <li key={group.articleTitle}>
+                      {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           )}
 
@@ -432,8 +486,3 @@ function groupSentences(paragraph: Paragraph, section: Section, policy: Policy):
 }
 
 /** A section the agent has read can still be one the reader is not allowed to see the name of. */
-function scannedLabel(article: Article | null, policy: Policy, sectionId: string): string {
-  const section = article?.sections.find((candidate) => candidate.id === sectionId);
-  if (!section) return sectionId;
-  return hiddenHeading(section, policy) ? "a section whose heading is withheld" : sectionHeading(section);
-}
