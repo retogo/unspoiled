@@ -74,7 +74,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_article_outline",
       description:
-        "List the sections of the article that is currently open, with how many sentences are visible and how many are withheld as spoilers. Returns no article text — call get_safe_text on the sections the reader asked about to actually read them, and describe_hidden to see what is being held back.",
+        "List the sections of the article that is currently open, with how many sentences are visible and how many are withheld as spoilers. Returns no article text — call get_visible_section_text on the sections the reader asked about to actually read them, and describe_withheld_content to see what is being held back.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
@@ -89,9 +89,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "get_safe_text",
+      name: "get_visible_section_text",
       description:
-        "Read one section with the spoiler sentences removed. Only text the reader has chosen to be exposed to is returned; withheld sentences appear as placeholders. Summarise from this text alone, and tell the reader how many sentences were withheld rather than guessing at their content.",
+        "Read one section as the reader currently sees it: sentences the page or you withheld appear as placeholders, not text. Wording rules miss some spoilers, so visible does not mean spoiler-free. Summarise from this text alone, and tell the reader how many sentences were withheld rather than guessing at their content.",
       inputSchema: {
         type: "object",
         properties: { section_id: { type: "string", description: "Section id from get_article_outline" } },
@@ -116,7 +116,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "describe_hidden",
+      name: "describe_withheld_content",
       description:
         "Describe what is being withheld in a section without revealing it: sentence ids, why each was withheld, and how long it is. When the heading itself is withheld it comes back as null with a heading_id you can pass to reveal. Use this to reason about the article without learning the spoilers.",
       inputSchema: {
@@ -193,9 +193,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "reveal",
+      name: "reveal_withheld_sentences",
       description:
-        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a heading_id from get_article_outline or describe_hidden to reveal a withheld heading. The text is shown on their screen and returned here — which means you have read the spoilers, so every section this opens is listed on screen next to the ones you read with scan_section.",
+        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a heading_id from get_article_outline or describe_withheld_content to reveal a withheld heading. The text is shown on their screen and returned here — which means you have read the spoilers, so every section this opens is listed on screen next to the ones you read with read_withheld_section.",
       inputSchema: {
         type: "object",
         properties: {
@@ -251,7 +251,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "mark_known_sections",
+      name: "mark_sections_known",
       description:
         "Unhide whole sections that this reader has already lived through, because a fact they already know is not a spoiler for them. Map what you know about them onto the section list: someone who finished season 1 can safely read the season 1 sections, someone who read the source novel can read the plot of the adaptation. Give the reason in 'because' — it is shown next to the section on their screen so they can disagree.",
       inputSchema: {
@@ -285,9 +285,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "withhold",
+      name: "withhold_article_content",
       description:
-        "Withhold text the page's own rules did not catch. The page matches wording, so it misses a spoiler stated plainly — 'his mother is eaten by a Titan' contains no giveaway words. Use this when the reader tells you what they do not want to know, or after scan_section, where you can spend your own knowledge to protect theirs: read the plot, then withhold only the sentences that give away the ending so they can safely read the rest. The reason is shown on their screen.",
+        "Withhold text the page's own rules did not catch. The page matches wording, so it misses a spoiler stated plainly — 'his mother is eaten by a Titan' contains no giveaway words. Use this when the reader tells you what they do not want to know, or after read_withheld_section, where you can spend your own knowledge to protect theirs: read the plot, then withhold only the sentences that give away the ending so they can safely read the rest. The reason is shown on their screen.",
       inputSchema: {
         type: "object",
         properties: {
@@ -323,7 +323,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "reveal_progressively",
+      name: "reveal_section_progressively",
       description:
         "Open a withheld narrative section only up to a point. Plot summaries run in order, so a reader who stopped watching partway can safely read the beginning: reveal the first few paragraphs and leave the rest closed. Prefer this over revealing a whole section.",
       inputSchema: {
@@ -382,7 +382,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
-      name: "scan_section",
+      name: "read_withheld_section",
       description:
         "Read a withheld section in full, including the spoilers. This is a one-way door: once you read it you know the ending, and you may leak it later in conversation. Only call this with acknowledge=true after the reader has explicitly asked you to look. The reader is shown on screen which sections you have read.",
       inputSchema: {

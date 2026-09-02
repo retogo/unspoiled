@@ -144,7 +144,7 @@ describe("opening another article", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "mark_known_sections", {
+    await callTool(registered, "mark_sections_known", {
       section_ids: ["s2"],
       because: "finished season 1",
     });
@@ -160,7 +160,7 @@ describe("opening another article", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "withhold", {
+    await callTool(registered, "withhold_article_content", {
       sentence_ids: ["p1.0"],
       because: "the reader does not want production details",
     });
@@ -202,7 +202,7 @@ describe("opening another article", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "reveal", { sentence_ids: ["p2.0"] });
+    await callTool(registered, "reveal_withheld_sentences", { sentence_ids: ["p2.0"] });
     expect(screen.getByText(/Eren Yeager lives in a walled town/)).toBeTruthy();
 
     await openArticle(registered, "en", "Attack on Titan");
@@ -291,7 +291,7 @@ describe("open_article", () => {
     const registered = await renderWithAgent();
 
     await callTool(registered, "open_article", { title: "Attack on Titan" });
-    await callTool(registered, "mark_known_sections", { section_ids: ["s2"], because: "finished season 1" });
+    await callTool(registered, "mark_sections_known", { section_ids: ["s2"], because: "finished season 1" });
 
     const result = await callTool(registered, "open_article", { title: "The Sixth Sense" });
 
@@ -330,7 +330,7 @@ describe("the record of what the agent has read", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
     expect(screen.getByText(/It knows those spoilers/)).toBeTruthy();
 
     await openArticle(registered, "en", "Attack on Titan");
@@ -344,7 +344,7 @@ describe("the record of what the agent has read", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
 
     await openArticle(registered, "en", "The Sixth Sense");
     await openArticle(registered, "en", "Attack on Titan");
@@ -357,7 +357,7 @@ describe("the record of what the agent has read", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
 
     await openArticle(registered, "en", "The Sixth Sense");
 
@@ -369,7 +369,7 @@ describe("the record of what the agent has read", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "scan_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
 
     await openArticle(registered, "en", "The Sixth Sense");
 

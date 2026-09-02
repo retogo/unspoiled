@@ -51,10 +51,10 @@ describe("a section whose heading is the spoiler", () => {
 
   it("keeps it out of the list of what the agent has read", async () => {
     const call = await openArticle();
-    const described = await call("describe_hidden", { section_id: "s1" });
+    const described = await call("describe_withheld_content", { section_id: "s1" });
     const ids = (described.hidden as unknown as { sentence_id: string }[]).map((item) => item.sentence_id);
     expect(ids.length).toBeGreaterThan(0);
-    await call("reveal", { sentence_ids: ids });
+    await call("reveal_withheld_sentences", { sentence_ids: ids });
 
     const panel = await screen.findByRole("heading", { name: "Your agent has read" });
     expect(panel.parentElement?.textContent).not.toContain("Kira");
@@ -62,7 +62,7 @@ describe("a section whose heading is the spoiler", () => {
 
   it("shows the reader which sections the agent opened", async () => {
     const call = await openArticle();
-    await call("reveal", { sentence_ids: ["p1.0"] });
+    await call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
     await waitFor(() => expect(screen.getByRole("heading", { name: "Your agent has read" })).toBeTruthy());
     const report = await call("get_masking_report", {});
     expect(report.sections_the_agent_has_read).toEqual(["s1"]);

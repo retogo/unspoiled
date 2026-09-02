@@ -26,8 +26,8 @@ The division of labour is the point:
 Neither side can decide "what counts as a spoiler *for this reader*" alone. WebMCP is what joins
 them.
 
-And one property falls out of the tool surface itself: `get_safe_text` returns withheld sentences
-as placeholders, and `describe_hidden` returns their reasons and lengths but never their text.
+And one property falls out of the tool surface itself: `get_visible_section_text` returns withheld sentences
+as placeholders, and `describe_withheld_content` returns their reasons and lengths but never their text.
 There is no tool that hands over the ending by default. `ask_about_article` searches only the
 sentences you are allowed to see, so an answer built from it cannot contain a spoiler. The agent is
 not asked to keep a secret — it is never given one.
@@ -37,8 +37,8 @@ as `null` with a reason, not as text. A summary of a section it cannot name cann
 reason never repeats the heading either, so nothing the page says about what it is hiding hands the
 heading back.
 
-Two tools do open a door, and both say so on screen. `scan_section` refuses to return anything
-unless the caller confirms you asked for it. `reveal` hands back the sentences you asked for by name.
+Two tools do open a door, and both say so on screen. `read_withheld_section` refuses to return anything
+unless the caller confirms you asked for it. `reveal_withheld_sentences` hands back the sentences you asked for by name.
 Either way the sections your agent has read are listed on screen for the rest of the session.
 Consent is a state you can see, not a promise in a prompt.
 
@@ -48,15 +48,15 @@ Consent is a state you can see, not a promise in a prompt.
 | --- | --- |
 | `open_article` | Open a Wikipedia article by title, in English or Japanese |
 | `get_article_outline` | Sections, risk level, how many sentences are visible and withheld. No article text |
-| `get_safe_text` | One section with withheld sentences replaced by placeholders |
-| `describe_hidden` | What is withheld and why — ids, reasons, lengths, never the text |
+| `get_visible_section_text` | One section with withheld sentences replaced by placeholders |
+| `describe_withheld_content` | What is withheld and why — ids, reasons, lengths, never the text |
 | `set_spoiler_policy` | How much this reader wants to see, plus what they already know. `strict` withholds narrative sections and every hint at the ending, `balanced` withholds narrative sections and sentences that state a reveal outright, `open` withholds nothing |
-| `mark_known_sections` | Unhide sections this reader has already lived through, with the reason shown |
-| `withhold` | Withhold what the page's wording rules missed — the agent's judgement, the page's enforcement |
-| `reveal` | Reveal specific sentences, when the reader asks for them |
-| `reveal_progressively` | Open a plot only as far as the reader has watched |
+| `mark_sections_known` | Unhide sections this reader has already lived through, with the reason shown |
+| `withhold_article_content` | Withhold what the page's wording rules missed — the agent's judgement, the page's enforcement |
+| `reveal_withheld_sentences` | Reveal specific sentences, when the reader asks for them |
+| `reveal_section_progressively` | Open a plot only as far as the reader has watched |
 | `ask_about_article` | Search for evidence answering a question, drawn only from visible sentences |
-| `scan_section` | Read a withheld section in full — refused unless the reader explicitly asked |
+| `read_withheld_section` | Read a withheld section in full — refused unless the reader explicitly asked |
 | `get_masking_report` | Audit of everything currently withheld, and which sections the agent has read |
 
 ## Running it
