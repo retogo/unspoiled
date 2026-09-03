@@ -247,6 +247,15 @@ describe("exposing the tools to an agent", () => {
     expect(screen.queryByText(/tools exposed via/)).toBeNull();
   });
 
+  it("shows the reader which calls failed", async () => {
+    const registered = await renderWithAgent();
+    await callTool(registered, "get_article_outline");
+
+    const panel = screen.getByRole("heading", { name: "Tool activity" }).parentElement;
+    expect(panel?.textContent).toContain("get_article_outline");
+    expect(panel?.textContent).toContain("error");
+  });
+
   it("names the holder the tools were actually registered on", async () => {
     installAgent(navigator);
 

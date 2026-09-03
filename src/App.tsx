@@ -332,7 +332,8 @@ export default function App() {
                 {calls.map((call) => (
                   <li key={`${call.at}-${call.tool}`} className="rounded bg-white px-2 py-1">
                     <code className="font-medium">{call.tool}</code>
-                    <span className="block text-zinc-500">
+                    {!call.ok && <span className="ml-1 font-medium text-red-700">error</span>}
+                    <span className={`block ${call.ok ? "text-zinc-500" : "text-red-700"}`}>
                       {call.input} → {call.summary}
                     </span>
                   </li>

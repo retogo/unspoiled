@@ -9,6 +9,7 @@ export type ToolCall = {
   at: number;
   tool: string;
   input: string;
+  ok: boolean;
   summary: string;
 };
 
@@ -71,11 +72,13 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-async function runTool(definition: ToolDefinition, input: Record<string, unknown>): Promise<unknown> {
+type Outcome = { ok: boolean; value: unknown };
+
+async function runTool(definition: ToolDefinition, input: Record<string, unknown>): Promise<Outcome> {
   try {
-    return await definition.execute(input);
+    return { ok: true, value: await definition.execute(input) };
   } catch (cause) {
-    return { error: message(cause) };
+    return { ok: false, value: { error: message(cause) } };
   }
 }
 
@@ -94,14 +97,17 @@ export function registerTools(definitions: ToolDefinition[], onCall: (call: Tool
         inputSchema: definition.inputSchema,
         execute: async (raw: unknown) => {
           const input = parseInput(raw);
-          const text = JSON.stringify(await runTool(definition, input));
+          const { ok, value } = await runTool(definition, input);
+          const text = JSON.stringify(value);
           onCall({
             at: Date.now(),
             tool: definition.name,
             input: JSON.stringify(input),
+            ok,
             summary: `${text.length} chars`,
           });
-          return { content: [{ type: "text", text }] };
+          const content = [{ type: "text", text }];
+          return ok ? { content } : { content, isError: true };
         },
       }),
     ),
