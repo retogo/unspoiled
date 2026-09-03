@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { flowDelay, flowPieces } from "./lib/flow";
+import { flowDelay, flowPieces, flowStart } from "./lib/flow";
 import { maskRows } from "./lib/mask";
 import {
   assessSection,
@@ -232,9 +232,10 @@ export default function App() {
     });
 
   /**
-   * Which sentences arrive a word at a time, and in what order they were opened. Opening one is a
-   * deliberate act — a button here, or a reveal tool — and worth watching arrive. The slider can
-   * open hundreds at once and never touches `revealed`, so those keep the plain fade.
+   * Which sentences arrive a word at a time, and when each of them begins. Opening one is a
+   * deliberate act — a button here, or a reveal tool — and worth watching arrive, one sentence after
+   * another. The slider can open hundreds at once and never touches `revealed`, so those keep the
+   * plain fade.
    */
   const revealedBefore = useRef(policy.revealed);
   useEffect(() => {
@@ -246,7 +247,7 @@ export default function App() {
     setFlowing((current) => {
       const next = new Map(current);
       for (const id of closed) next.delete(id);
-      opened.forEach((id, order) => next.set(id, order));
+      opened.forEach((id, order) => next.set(id, flowStart(order, opened.length)));
       return next;
     });
   }, [policy.revealed]);
@@ -684,7 +685,7 @@ function SectionView({
                   key={sentence.id}
                   sentence={sentence}
                   lang={lang}
-                  order={flowing.get(sentence.id)}
+                  start={flowing.get(sentence.id)}
                   onHide={policy.revealed.has(sentence.id) ? onHide : null}
                 />
               ))
@@ -706,21 +707,21 @@ const OPENED = "underline decoration-dotted decoration-edge underline-offset-4";
 function SentenceView({
   sentence,
   lang,
-  order,
+  start,
   onHide,
   label = "Hide this sentence again",
 }: {
   sentence: { id: string; text: string };
   lang: Lang;
-  order: number | undefined;
+  start: number | undefined;
   onHide: ((sentenceIds: string[]) => void) | null;
   label?: string;
 }) {
   const body =
-    order === undefined ? (
+    start === undefined ? (
       <span className="unspoiled-text">{sentence.text}</span>
     ) : (
-      <FlowingText text={sentence.text} lang={lang} order={order} />
+      <FlowingText text={sentence.text} lang={lang} start={start} />
     );
 
   if (!onHide) {
@@ -740,7 +741,7 @@ function SentenceView({
 }
 
 /** The words of an opened sentence, each set to arrive a beat after the one before it. */
-function FlowingText({ text, lang, order }: { text: string; lang: Lang; order: number }) {
+function FlowingText({ text, lang, start }: { text: string; lang: Lang; start: number }) {
   const pieces = useMemo(() => flowPieces(text, lang), [lang, text]);
   return (
     <>
@@ -748,7 +749,7 @@ function FlowingText({ text, lang, order }: { text: string; lang: Lang; order: n
         <span
           key={`${index}:${piece}`}
           className="unspoiled-flow"
-          style={{ animationDelay: `${flowDelay(index, pieces.length, order)}ms` }}
+          style={{ animationDelay: `${flowDelay(index, pieces.length, start)}ms` }}
         >
           {piece}
         </span>
@@ -798,7 +799,7 @@ function SectionHeading({
     <SentenceView
       sentence={{ id, text: sectionHeading(section) }}
       lang={lang}
-      order={flowing.get(id)}
+      start={flowing.get(id)}
       onHide={onHide}
       label="Hide this heading again"
     />

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { flowPieces } from "./lib/flow";
+import { flowPieces, flowStart } from "./lib/flow";
 
 const HTML = `<div class="mw-parser-output">
   <p>The Sixth Sense is a 1999 American supernatural thriller film.</p>
@@ -91,7 +91,7 @@ describe("a sentence the reader has just opened", () => {
     expect(isAscending(flowDelays())).toBe(true);
   });
 
-  it("starts while the sentence before it in the paragraph is still arriving", async () => {
+  it("waits for the sentence before it in the paragraph to finish arriving", async () => {
     await openArticle();
 
     await revealParagraph(1);
@@ -99,8 +99,8 @@ describe("a sentence the reader has just opened", () => {
     const delays = flowDelays();
     const second = flowPieces(OPENING, "en").length;
     expect(delays[0]).toBe(0);
-    expect(delays[second]).toBeGreaterThan(0);
-    expect(delays[second]).toBeLessThan(delays[second - 1]);
+    expect(delays[second]).toBe(flowStart(1, 2));
+    expect(isAscending(delays)).toBe(true);
   });
 
   it("arrives the same way when the agent opens it", async () => {
