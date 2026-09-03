@@ -2,31 +2,23 @@ import type { Run } from "./segment";
 import type { Lang } from "./wikipedia";
 
 /**
- * A sentence the reader opened arrives a word at a time, from the front, and the sentences of one
- * reveal arrive one after another rather than together. Neighbouring words are `PIECE_STEP_MS`
- * apart, a long sentence compressing that step so it never spends more than `SENTENCE_SPREAD_MS`
- * arriving, and each word then takes `FLOW_PIECE_MS` to resolve — the duration `.unspoiled-flow`
- * carries in `index.css`. The next sentence starts `SENTENCE_GAP_MS` after the last word of the one
- * before it has begun to arrive, so the wait is the length of the sentence being read rather than a
- * fixed beat, and a short sentence is followed closely. Only when a reveal opens so many that the
- * run would outlast `BATCH_MS` is the whole thing tightened, in proportion, so the long and the
- * short of it keep their relative weight.
+ * What one reveal opens arrives as a single stream of words, from the front. Neighbouring words are
+ * `PIECE_STEP_MS` apart wherever they fall, so the first word of a sentence follows the last word of
+ * the one before it at exactly that step and nothing pauses at a full stop. Each word then takes
+ * `FLOW_PIECE_MS` to resolve — the duration `.unspoiled-flow` carries in `index.css`. Only when a
+ * reveal opens so many words that the stream would outlast `BATCH_MS` does the step tighten, and it
+ * tightens for every word of that reveal alike.
  */
 const PIECE_STEP_MS = 20;
-const SENTENCE_SPREAD_MS = 300;
-const SENTENCE_GAP_MS = 150;
 const BATCH_MS = 2800;
 
 export const FLOW_PIECE_MS = 320;
 
-function pieceStep(count: number): number {
-  return Math.min(PIECE_STEP_MS, SENTENCE_SPREAD_MS / Math.max(1, count - 1));
-}
-
-/** How long a sentence of `count` words spends arriving, from its first word to its last. */
-function spread(count: number): number {
-  return Math.max(0, count - 1) * pieceStep(count);
-}
+/** Where a sentence sits in the stream its reveal opened, and how fast that stream runs. */
+export type FlowTiming = {
+  start: number;
+  step: number;
+};
 
 /**
  * The words of a sentence, each carrying the spaces and punctuation that follow it, so joining the
@@ -55,22 +47,19 @@ export function flowWords(split: string[][]): number {
   return split.reduce((total, pieces) => total + pieces.length, 0);
 }
 
-/** When each sentence of one reveal begins, given how many words each of them arrives in. */
-export function flowStarts(counts: number[]): number[] {
-  let at = 0;
-  const starts = counts.map((count) => {
-    const start = at;
-    at += spread(count) + SENTENCE_GAP_MS;
-    return start;
+/** Where each sentence of one reveal falls in the stream, given how many words each arrives in. */
+export function flowTimings(counts: number[]): FlowTiming[] {
+  const words = counts.reduce((total, count) => total + count, 0);
+  const step = Math.min(PIECE_STEP_MS, (BATCH_MS - FLOW_PIECE_MS) / Math.max(1, words - 1));
+  let before = 0;
+  return counts.map((count) => {
+    const start = Math.round(before * step);
+    before += count;
+    return { start, step };
   });
-
-  const last = starts.length - 1;
-  const limit = BATCH_MS - spread(counts[last]) - FLOW_PIECE_MS;
-  const tighten = starts[last] > limit ? limit / starts[last] : 1;
-  return starts.map((start) => Math.round(start * tighten));
 }
 
-/** How long piece `index` of a sentence of `count` pieces waits, given when that sentence begins. */
-export function flowDelay(index: number, count: number, start: number): number {
-  return Math.round(start + index * pieceStep(count));
+/** How long word `index` of a sentence waits, given where its reveal placed that sentence. */
+export function flowDelay(index: number, timing: FlowTiming): number {
+  return Math.round(timing.start + index * timing.step);
 }
