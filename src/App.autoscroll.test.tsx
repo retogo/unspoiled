@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -40,9 +40,21 @@ function words(): HTMLElement[] {
 }
 
 /** jsdom lays nothing out, so each word is told where it sits and then told it has begun to arrive. */
-function arrives(word: HTMLElement, bottom: number) {
+function starts(word: HTMLElement, bottom: number) {
   word.getBoundingClientRect = () => ({ top: bottom - 24, bottom, height: 24 }) as DOMRect;
   fireEvent(word, new Event("animationstart", { bubbles: true }));
+}
+
+/** The page catches up once a frame, however many words began arriving within it. */
+async function nextFrame() {
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+}
+
+async function arrives(word: HTMLElement, bottom: number) {
+  starts(word, bottom);
+  await nextFrame();
 }
 
 /** The policy bar is pinned across the foot of the window on a narrow screen. */
@@ -69,7 +81,7 @@ describe("the page following the words a reveal is opening", () => {
     await openArticle();
     await revealParagraph();
 
-    arrives(words()[0], 700);
+    await arrives(words()[0], 700);
 
     expect(scrollBy).toHaveBeenCalledWith({ top: 20, behavior: "smooth" });
   });
@@ -78,7 +90,7 @@ describe("the page following the words a reveal is opening", () => {
     await openArticle();
     await revealParagraph();
 
-    arrives(words()[0], 300);
+    await arrives(words()[0], 300);
 
     expect(scrollBy).not.toHaveBeenCalled();
   });
@@ -88,7 +100,7 @@ describe("the page following the words a reveal is opening", () => {
     await revealParagraph();
     pinPolicyBarAcrossFoot(66);
 
-    arrives(words()[0], 700);
+    await arrives(words()[0], 700);
 
     expect(scrollBy).toHaveBeenCalledWith({ top: 86, behavior: "smooth" });
   });
@@ -98,7 +110,7 @@ describe("the page following the words a reveal is opening", () => {
     await revealParagraph();
 
     fireEvent.wheel(window);
-    arrives(words()[0], 700);
+    await arrives(words()[0], 700);
 
     expect(scrollBy).not.toHaveBeenCalled();
   });
@@ -108,7 +120,7 @@ describe("the page following the words a reveal is opening", () => {
     await revealParagraph();
 
     fireEvent.keyDown(window, { key: "PageDown" });
-    arrives(words()[0], 700);
+    await arrives(words()[0], 700);
 
     expect(scrollBy).not.toHaveBeenCalled();
   });
@@ -119,9 +131,19 @@ describe("the page following the words a reveal is opening", () => {
     fireEvent.wheel(window);
 
     await userEvent.click(screen.getByRole("button", { name: /^Reveal 1 sentence withheld/ }));
-    arrives(words().at(-1) as HTMLElement, 700);
+    await arrives(words().at(-1) as HTMLElement, 700);
 
     expect(scrollBy).toHaveBeenCalledWith({ top: 20, behavior: "smooth" });
+  });
+
+  it("moves once for all the words that begin arriving within the same frame", async () => {
+    await openArticle();
+    await revealParagraph();
+
+    for (const word of words().slice(0, 8)) starts(word, 700);
+    await nextFrame();
+
+    expect(scrollBy).toHaveBeenCalledTimes(1);
   });
 
   it("leaves the page alone for the sentences the slider opens", async () => {
@@ -129,7 +151,7 @@ describe("the page following the words a reveal is opening", () => {
 
     fireEvent.change(screen.getByRole("slider"), { target: { value: "30" } });
     const shown = document.querySelector<HTMLElement>(".unspoiled-text");
-    if (shown) arrives(shown, 700);
+    if (shown) await arrives(shown, 700);
 
     expect(scrollBy).not.toHaveBeenCalled();
   });

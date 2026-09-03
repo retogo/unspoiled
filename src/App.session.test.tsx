@@ -234,6 +234,19 @@ describe("opening another article", () => {
   });
 });
 
+describe("what the tools see of the page", () => {
+  it("reports what the reader opened a moment ago, not the page as it was before", async () => {
+    const registered = await renderWithAgent();
+    await openArticle(registered, "en", "Attack on Titan");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Reveal .* chars$/ }));
+
+    const report = await callTool(registered, "get_masking_report");
+    expect((report.policy as { revealed: string[] }).revealed).toEqual(["p2.0"]);
+    expect(report.revealed_on_page).toEqual(["p2.0"]);
+  });
+});
+
 describe("exposing the tools to an agent", () => {
   it("takes its tools back when the reader leaves the page", async () => {
     const { registered, context } = installAgent();

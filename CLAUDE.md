@@ -9,9 +9,12 @@ at the root). The reader must work with no agent attached; the tools are an addi
 
 - `npm test` runs vitest once; `npm run test:watch` while developing.
 - `npm run build` is `tsc -b && vite build`: type errors fail the build, so run it before committing.
-- `npm run lint` (oxlint) reports 4 `react(refs)` warnings in `App.tsx`. They are deliberate:
-  tools are registered once on mount and read live state through refs. Do not "fix" them by
-  re-registering per render.
+- `npm run lint` (oxlint) is clean; keep it that way.
+- The React Compiler is on (`react({ compiler: true })`, which needs `oxc-transform-react`), so write
+  components plainly and leave `memo` / `useMemo` / `useCallback` out unless a measurement asks for
+  one. It compiles every component except `App`, which it skips over the `try`/`finally` in `search`:
+  drop that `finally` and `App` compiles too. To see what it skipped, transform a file with
+  `transformSync(file, source, { reactCompiler: true, lang: "tsx" })` and read `errors`.
 - Deploy: `vercel deploy --prod --yes --scope retogo`. Without `--scope` the CLI says "Not authorized".
 
 ## Invariants (the product claim; break one and the project is pointless)
