@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { flowDelay, flowPieces } from "./lib/flow";
+import { maskRows } from "./lib/mask";
 import {
   assessSection,
   countHidden,
@@ -554,6 +555,9 @@ function Ledger({
   );
 }
 
+/** A withheld paragraph stands as tall as the lines it replaces, at the leading of the body text. */
+const MASK_ROW_REM = 1.75;
+
 function SectionView({
   section,
   policy,
@@ -603,20 +607,21 @@ function SectionView({
           open only as far as you have watched.
         </p>
         <div className="mt-2 space-y-1.5">
-          {section.paragraphs.map((paragraph, index) => (
-            <button
-              key={paragraph.id}
-              onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
-              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-edge bg-surface px-3 py-2 text-left text-xs text-mask-ink hover:border-edge-hover"
-            >
-              <span className="font-medium">Paragraph {index + 1}</span>
-              <span className="text-faint">
-                {paragraph.sentences.length} sentences ·{" "}
-                {paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0)} chars
-              </span>
-              <span className="ml-auto underline">reveal</span>
-            </button>
-          ))}
+          {section.paragraphs.map((paragraph) => {
+            const chars = paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0);
+            const held = `${sentenceCount(paragraph.sentences.length)} withheld`;
+            return (
+              <button
+                key={paragraph.id}
+                onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
+                aria-label={`Reveal ${held}, ${chars} chars`}
+                style={{ minHeight: `${maskRows(chars, lang) * MASK_ROW_REM}rem` }}
+                className="unspoiled-mask flex w-full items-start rounded bg-mask px-2 py-1 text-left text-xs text-mask-ink hover:bg-mask-hover"
+              >
+                {held} · {chars} chars · reveal
+              </button>
+            );
+          })}
         </div>
       </section>
     );
@@ -635,7 +640,7 @@ function SectionView({
                 title={run.reason}
                 className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
               >
-                {run.sentences.length === 1 ? "1 sentence" : `${run.sentences.length} sentences`} withheld · reveal
+                {sentenceCount(run.sentences.length)} withheld · reveal
               </button>
             ) : (
               /* One view per sentence, so only the sentences that just appeared animate in. */
