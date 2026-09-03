@@ -8,7 +8,6 @@ function sections(html: string) {
     title: "Test",
     displayTitle: "Test",
     sourceUrl: "https://en.wikipedia.org/wiki/Test",
-    sections: [],
     html: `<div class="mw-parser-output">${html}</div>`,
   }).sections;
 }

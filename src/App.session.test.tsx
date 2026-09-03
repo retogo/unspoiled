@@ -85,7 +85,6 @@ function fetched(lang: Lang, title: string, html: string): FetchedArticle {
     title,
     displayTitle: title,
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${title}`,
-    sections: [],
     html: `<div class="mw-parser-output">${html}</div>`,
   };
 }
