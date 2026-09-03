@@ -265,8 +265,32 @@ describe("apply_mask", () => {
     expect(() => harness().call("apply_mask", { hide: { sentence_ids: ["p4.0"] }, reason: "   " })).toThrow(/reason/);
   });
 
-  it("refuses an id the article does not have, rather than silently masking nothing", () => {
-    expect(() => harness().call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "a typo" })).toThrow(/p9.9/);
+  it("names the ids it could not find, rather than failing the call", () => {
+    const { call } = harness();
+    const result = call("apply_mask", {
+      hide: { section_ids: ["s9"], paragraph_ids: ["p9"], sentence_ids: ["p9.9"] },
+      reason: "you asked not to know how it ends",
+    });
+    expect(result).toMatchObject({
+      matched: { shown: 0, hidden: 0 },
+      unknown_ids: ["s9", "p9", "p9.9"],
+    });
+  });
+
+  it("records a decision that reached nothing, so the reader sees it was made", () => {
+    const { call } = harness();
+    call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "you asked not to know how it ends" });
+    expect(call("get_masking_report").decisions).toMatchObject([
+      { show: [], hide: [], reason: "you asked not to know how it ends" },
+    ]);
+  });
+
+  it("records a decision that changed nothing, because the sentence was already shown", () => {
+    const { call } = harness();
+    const before = call("get_masking_report").sentences;
+    const result = call("apply_mask", { show: { sentence_ids: ["p0.0"] }, reason: "you have read the lead" });
+    expect(result).toMatchObject({ matched: { shown: 1, hidden: 0 }, unknown_ids: [], sentences: before });
+    expect(call("get_masking_report").decisions).toHaveLength(1);
   });
 
   it("records only what it did, where a sentence was named on both sides", () => {

@@ -122,6 +122,16 @@ describe("what the page shows the reader about its own filtering", () => {
     expect(ledger("Your agent's decisions")).toContain("2 shown · 0 hidden");
   });
 
+  it("shows a decision that reached nothing, rather than letting it pass in silence", async () => {
+    const { call } = await readerWithAgent();
+
+    await call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "you asked not to know the ending" });
+
+    expect(ledger("Your agent's decisions")).toContain("you asked not to know the ending");
+    expect(ledger("Your agent's decisions")).toContain("0 shown · 0 hidden");
+    expect(screen.getByText("Your agent's decisions · 1")).toBeTruthy();
+  });
+
   it("keeps the newest decision at the top", async () => {
     const { call } = await readerWithAgent();
 

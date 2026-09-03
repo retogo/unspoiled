@@ -57,11 +57,13 @@ function sectionsNamed(article: Article, ids: unknown): Section[] {
 }
 
 /**
- * An id the article does not have is refused rather than skipped: a decision that silently reached
- * nothing would leave the agent believing it had masked something, and the reader looking at text
- * their agent thinks is hidden.
+ * The sentences one side of a decision names, and the ids that named nothing. An id the article
+ * does not have is reported rather than thrown: the decision still stands and is still recorded,
+ * and the agent is told which of its ids missed instead of losing the whole call to one typo.
  */
-function selectedSentences(article: Article, selector: unknown): string[] {
+type Selection = { ids: string[]; unknown: string[] };
+
+function selectSentences(article: Article, selector: unknown): Selection {
   const { section_ids, paragraph_ids, sentence_ids } = (selector ?? {}) as {
     section_ids?: string[];
     paragraph_ids?: string[];
@@ -77,19 +79,22 @@ function selectedSentences(article: Article, selector: unknown): string[] {
   }
 
   const selected: string[] = [];
-  for (const section of sectionsNamed(article, section_ids ?? [])) selected.push(...sentenceIdsIn(section));
+  const unknown: string[] = [];
+  for (const id of section_ids ?? []) {
+    const section = article.sections.find((candidate) => candidate.id === id);
+    if (section) selected.push(...sentenceIdsIn(section));
+    else unknown.push(id);
+  }
   for (const id of paragraph_ids ?? []) {
     const paragraph = paragraphs.get(id);
-    if (!paragraph) throw new Error(`Unknown paragraph_id: ${id}. Call open_article for the ids of this article.`);
-    selected.push(...paragraph.sentences.map((sentence) => sentence.id));
+    if (paragraph) selected.push(...paragraph.sentences.map((sentence) => sentence.id));
+    else unknown.push(id);
   }
   for (const id of sentence_ids ?? []) {
-    if (!sentences.has(id)) {
-      throw new Error(`Unknown sentence_id: ${id}. Call read_article_content for the ids of this article.`);
-    }
-    selected.push(id);
+    if (sentences.has(id)) selected.push(id);
+    else unknown.push(id);
   }
-  return [...new Set(selected)];
+  return { ids: [...new Set(selected)], unknown };
 }
 
 function outlineSection(section: Section, policy: Policy) {
@@ -206,7 +211,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "apply_mask",
       description:
-        "Decide what this reader sees, and have the page enforce it sentence by sentence. Name whole sections, whole paragraphs or single sentences on either side: `show` puts text on their screen that the page was withholding, `hide` takes down text the page's wording rules let through — 'his mother is eaten by a Titan' carries no giveaway words. Your decision outranks those rules in both directions, and hiding beats showing where a sentence is named on both. Spend what you know about this reader: someone who finished season 1 can be shown the season 1 sections, someone who stopped halfway through a plot can be shown its opening paragraphs and no more. The reason is required and is displayed to them beside the count, so write it in their terms and call this once per decision rather than once per sentence. Call get_masking_report afterwards to see the page as they now see it.",
+        "Decide what this reader sees, and have the page enforce it sentence by sentence. Name whole sections, whole paragraphs or single sentences on either side: `show` puts text on their screen that the page was withholding, `hide` takes down text the page's wording rules let through — 'his mother is eaten by a Titan' carries no giveaway words. Your decision outranks those rules in both directions, and hiding beats showing where a sentence is named on both. Spend what you know about this reader: someone who finished season 1 can be shown the season 1 sections, someone who stopped halfway through a plot can be shown its opening paragraphs and no more. The reason is required and is displayed to them beside the count, so write it in their terms and call this once per decision rather than once per sentence. Every call is recorded on their screen, including one that reached nothing: `matched` says how many sentences each side actually moved and `unknown_ids` lists the ids that named nothing, so check both rather than assuming the mask took. Call get_masking_report afterwards to see the page as they now see it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -224,17 +229,28 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const article = requireArticle(context);
         const reason = typeof input.reason === "string" ? input.reason.trim() : "";
         if (reason === "") throw new Error("A reason is required: it is shown to the reader beside what you masked.");
-        const hide = selectedSentences(article, input.hide);
+        const hidden = selectSentences(article, input.hide);
+        const shown = selectSentences(article, input.show);
+        const hide = hidden.ids;
         /* Hiding wins, so a sentence named on both sides was never shown: the record says so. */
-        const show = selectedSentences(article, input.show).filter((id) => !hide.includes(id));
+        const show = shown.ids.filter((id) => !hide.includes(id));
         const policy = context.policy();
         const masked = maskWith(policy, show, hide);
+        /* Every call is recorded, a call that reached nothing included: a decision the reader
+           cannot see is a decision they cannot disagree with. */
         const next: Policy = {
           ...masked,
           decisions: [...policy.decisions, { at: Date.now(), show, hide, reason }],
         };
         context.setPolicy(next);
-        return { show, hide, reason, sentences: countSentences(article, next) };
+        return {
+          show,
+          hide,
+          reason,
+          matched: { shown: show.length, hidden: hide.length },
+          unknown_ids: [...new Set([...shown.unknown, ...hidden.unknown])],
+          sentences: countSentences(article, next),
+        };
       },
     },
     {

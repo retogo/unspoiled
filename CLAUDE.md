@@ -24,11 +24,16 @@ at the root). The reader must work with no agent attached; the tools are an addi
 - Precedence when deciding whether a sentence shows: `hidden` beats `shown`, and both beat the
   page's wording rules. A decision therefore holds at every sensitivity, including zero.
 - `apply_mask` applies one decision in one call: sections, paragraphs and sentences on either
-  side, `hide` winning where a sentence is named on both. The `reason` is required and is never
-  blank — the page has nothing to show the reader without it.
-- Every decision reaches the screen. The reason and the counts appear under "Your agent's
-  decisions", opened sentences under "Revealed on your page", and every section
-  `read_article_content` touched under "Your agent has read". Never filter silently.
+  side, `hide` winning where a sentence is named on both. A blank `reason` is the only thing that
+  fails the call — the page has nothing to show the reader without it. An id that names nothing
+  comes back in `unknown_ids` beside `matched`, and does not lose the rest of the call.
+- Every call of `apply_mask` is recorded and shown, including one that matched nothing or changed
+  nothing: it appears as "0 shown · 0 hidden" with its reason. A silent no-op is a decision the
+  reader cannot disagree with.
+- Every decision reaches the screen, under exactly these names: the reason and the counts under
+  "Your agent's decisions", opened sentences under "Revealed on your page", and every section
+  `read_article_content` touched under "Your agent has read". Never filter silently, and do not
+  rename these panels.
 - The reader outranks everyone: a tap lands in the same two sets, so it can take back what the
   agent decided. Only `apply_mask` writes to `decisions`.
 - Withheld text is never in the DOM. Render placeholders; never blur or hide real text with CSS.
