@@ -224,8 +224,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const article = requireArticle(context);
         const reason = typeof input.reason === "string" ? input.reason.trim() : "";
         if (reason === "") throw new Error("A reason is required: it is shown to the reader beside what you masked.");
-        const show = selectedSentences(article, input.show);
         const hide = selectedSentences(article, input.hide);
+        /* Hiding wins, so a sentence named on both sides was never shown: the record says so. */
+        const show = selectedSentences(article, input.show).filter((id) => !hide.includes(id));
         const policy = context.policy();
         const masked = maskWith(policy, show, hide);
         const next: Policy = {

@@ -269,6 +269,17 @@ describe("apply_mask", () => {
     expect(() => harness().call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "a typo" })).toThrow(/p9.9/);
   });
 
+  it("records only what it did, where a sentence was named on both sides", () => {
+    const { call } = harness();
+    const result = call("apply_mask", {
+      show: { paragraph_ids: ["p1"] },
+      hide: { sentence_ids: ["p1.1"] },
+      reason: "you have watched the opening scene only",
+    });
+    expect(result).toMatchObject({ show: ["p1.0"], hide: ["p1.1"] });
+    expect(call("get_masking_report").decisions).toMatchObject([{ show: ["p1.0"], hide: ["p1.1"] }]);
+  });
+
   it("reports what it reached, so the agent can check its own decision", () => {
     const result = harness().call("apply_mask", {
       show: { paragraph_ids: ["p1"] },
