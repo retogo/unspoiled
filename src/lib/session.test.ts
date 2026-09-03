@@ -21,6 +21,7 @@ function article(lang: Lang, title: string, sections: Section[] = []): Article {
     displayTitle: title,
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${title}`,
     sections,
+    references: [],
   };
 }
 
@@ -30,7 +31,11 @@ function section(id: string, heading: string, sentenceIds: string[]): Section {
     heading,
     headingPath: [heading],
     level: 2,
-    paragraphs: [{ id: `p${id}`, sentences: sentenceIds.map((sentenceId) => ({ id: sentenceId, text: sentenceId })) }],
+    paragraphs: [{ id: `p${id}`, sentences: sentenceIds.map((sentenceId) => ({
+        id: sentenceId,
+        text: sentenceId,
+        runs: [{ kind: "text", text: sentenceId }],
+      })) }],
   };
 }
 

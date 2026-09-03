@@ -12,7 +12,11 @@ function section(id: string, heading: string, sentences: string[]): Section {
     paragraphs: [
       {
         id: `${id}p0`,
-        sentences: sentences.map((text, position) => ({ id: `${id}p0.${position}`, text })),
+        sentences: sentences.map((text, position) => ({
+          id: `${id}p0.${position}`,
+          text,
+          runs: [{ kind: "text", text }],
+        })),
       },
     ],
   };
@@ -25,6 +29,7 @@ function article(...sections: Section[]): Article {
     displayTitle: "Test",
     sourceUrl: "https://en.wikipedia.org/wiki/Test",
     sections,
+    references: [],
   };
 }
 
