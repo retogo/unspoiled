@@ -175,6 +175,13 @@ export default function App() {
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
 
+  const hide = (sentenceIds: string[]) =>
+    setPolicy((current) => {
+      const revealed = new Set(current.revealed);
+      for (const id of sentenceIds) revealed.delete(id);
+      return { ...current, revealed };
+    });
+
   /**
    * Which sentences arrive a word at a time, and in what order they were opened. Opening one is a
    * deliberate act — a button here, or a reveal tool — and worth watching arrive. The slider can
@@ -298,6 +305,7 @@ export default function App() {
                   lang={article.lang}
                   flowing={flowing}
                   onReveal={reveal}
+                  onHide={hide}
                 />
               ))}
             </article>
@@ -432,12 +440,14 @@ function SectionView({
   lang,
   flowing,
   onReveal,
+  onHide,
 }: {
   section: Section;
   policy: Policy;
   lang: Lang;
   flowing: ReadonlyMap<string, number>;
   onReveal: (sentenceIds: string[]) => void;
+  onHide: (sentenceIds: string[]) => void;
 }) {
   const risk = assessSection(section);
   const known = isSectionKnown(policy, section.id);
@@ -447,6 +457,9 @@ function SectionView({
     0,
   );
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
+  const opened = section.paragraphs.flatMap((paragraph) =>
+    paragraph.sentences.filter((sentence) => policy.revealed.has(sentence.id)).map((sentence) => sentence.id),
+  );
   const heading = (
     <SectionHeading
       section={section}
@@ -455,7 +468,9 @@ function SectionView({
       policy={policy}
       lang={lang}
       flowing={flowing}
+      opened={opened}
       onReveal={onReveal}
+      onHide={onHide}
     />
   );
 
@@ -510,6 +525,7 @@ function SectionView({
                   sentence={sentence}
                   lang={lang}
                   order={flowing.get(sentence.id)}
+                  onHide={policy.revealed.has(sentence.id) ? onHide : null}
                 />
               ))
             ),
@@ -520,27 +536,46 @@ function SectionView({
   );
 }
 
+/** The marker that says a run of text is on screen because the reader opened it, and can be closed again. */
+const OPENED = "underline decoration-dotted decoration-zinc-300 underline-offset-4";
+
 /**
  * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
- * arrives word by word.
+ * arrives word by word and keeps a control to close it again.
  */
 function SentenceView({
   sentence,
   lang,
   order,
+  onHide,
+  label = "Hide this sentence again",
 }: {
   sentence: { id: string; text: string };
   lang: Lang;
   order: number | undefined;
+  onHide: ((sentenceIds: string[]) => void) | null;
+  label?: string;
 }) {
+  const body =
+    order === undefined ? (
+      <span className="unspoiled-text">{sentence.text}</span>
+    ) : (
+      <FlowingText text={sentence.text} lang={lang} order={order} />
+    );
+
+  if (!onHide) {
+    return (
+      <>
+        {body}{" "}
+      </>
+    );
+  }
+
   return (
-    <>
-      {order === undefined ? (
-        <span className="unspoiled-text">{sentence.text}</span>
-      ) : (
-        <FlowingText text={sentence.text} lang={lang} order={order} />
-      )}{" "}
-    </>
+    <span className="group">
+      <span className={OPENED}>{body}</span>
+      <HideButton label={label} onClick={() => onHide([sentence.id])} />
+    </span>
   );
 }
 
@@ -562,6 +597,20 @@ function FlowingText({ text, lang, order }: { text: string; lang: Lang; order: n
   );
 }
 
+/** It stands where the space between sentences would be, so opening one barely moves the text. */
+function HideButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title="Hide again"
+      className="inline-block w-2.5 rounded align-baseline text-center text-[11px] leading-none text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-700 focus-visible:opacity-100"
+    >
+      ×
+    </button>
+  );
+}
+
 function SectionHeading({
   section,
   hidden,
@@ -569,7 +618,9 @@ function SectionHeading({
   policy,
   lang,
   flowing,
+  opened,
   onReveal,
+  onHide,
 }: {
   section: Section;
   hidden: number;
@@ -577,7 +628,9 @@ function SectionHeading({
   policy: Policy;
   lang: Lang;
   flowing: ReadonlyMap<string, number>;
+  opened: string[];
   onReveal: (ids: string[]) => void;
+  onHide: (ids: string[]) => void;
 }) {
   const withheldHeading = hiddenHeading(section, policy);
   const id = headingId(section);
@@ -586,6 +639,8 @@ function SectionHeading({
       sentence={{ id, text: sectionHeading(section) }}
       lang={lang}
       order={flowing.get(id)}
+      onHide={onHide}
+      label="Hide this heading again"
     />
   ) : (
     sectionHeading(section)
@@ -614,6 +669,14 @@ function SectionHeading({
             {hidden} withheld
           </span>
         )
+      )}
+      {opened.length > 1 && (
+        <button
+          onClick={() => onHide(opened)}
+          className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-200"
+        >
+          Hide {opened.length} sentences again
+        </button>
       )}
     </h3>
   );

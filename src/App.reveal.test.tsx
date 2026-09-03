@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -129,5 +129,57 @@ describe("a sentence the sensitivity slider has opened", () => {
 
     expect(articleText()).toContain(OPENING);
     expect(flowing()).toHaveLength(0);
+  });
+});
+
+describe("hiding an opened sentence again", () => {
+  it("takes the sentence back out of the page and puts its placeholder back", async () => {
+    await openArticle();
+    await revealParagraph(2);
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide this sentence again" }));
+
+    expect(document.body.textContent).not.toContain("been a ghost since the opening scene");
+    expect(screen.getByRole("button", { name: /Paragraph 2/ })).toBeTruthy();
+  });
+
+  it("offers one control for the sentences a paragraph opened together", async () => {
+    await openArticle();
+    await revealParagraph(1);
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide 2 sentences again" }));
+
+    expect(document.body.textContent).not.toContain("shot by a former patient");
+    expect(document.body.textContent).not.toContain("Cole Sear");
+  });
+
+  it("takes back a heading the reader opened", async () => {
+    await openArticle();
+    await userEvent.click(screen.getByRole("button", { name: "Heading withheld · reveal" }));
+    expect(document.body.textContent).toContain("Ending explained");
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide this heading again" }));
+
+    expect(document.body.textContent).not.toContain("Ending explained");
+  });
+
+  it("lets the sentence flow in again when the reader opens it a second time", async () => {
+    await openArticle();
+    await revealParagraph(2);
+    await userEvent.click(screen.getByRole("button", { name: "Hide this sentence again" }));
+
+    await revealParagraph(2);
+
+    await waitFor(() => expect(flowing().length).toBeGreaterThan(1));
+    expect(flowDelays()[0]).toBe(0);
+  });
+
+  it("is offered only for what the reader opened, not for what the slider shows", async () => {
+    await openArticle();
+
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "30" } });
+
+    expect(articleText()).toContain(OPENING);
+    expect(screen.queryByRole("button", { name: "Hide this sentence again" })).toBeNull();
   });
 });
