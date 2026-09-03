@@ -41,6 +41,18 @@ function asLang(raw: string | null): Lang | null {
 }
 
 /**
+ * The article a URL names, or null for the search screen. A URL may carry any
+ * string, so the language counts only when it is an edition the reader could
+ * have picked; anything else reads as English rather than as a host to fetch
+ * from.
+ */
+export function readArticleTarget(search: string): SharedArticle | null {
+  const params = new URLSearchParams(search);
+  const title = params.get("title");
+  return title ? { lang: asLang(params.get("lang")) ?? "en", title } : null;
+}
+
+/**
  * A shared link may carry any string, so it is treated as untrusted input: the
  * reader's stored sensitivity wins over the one in the link, and a sensitivity
  * that arrives from either source is only used when it is a whole number on the
@@ -50,11 +62,23 @@ export function readSessionStart(search: string, storedSensitivity: string | nul
   const params = new URLSearchParams(search);
   const sensitivity =
     asSensitivity(storedSensitivity) ?? asSensitivity(params.get("sensitivity")) ?? DEFAULT_SENSITIVITY;
-  const title = params.get("title");
-  return {
-    policy: newPolicy(sensitivity),
-    article: title ? { lang: asLang(params.get("lang")) ?? "en", title } : null,
-  };
+  return { policy: newPolicy(sensitivity), article: readArticleTarget(search) };
+}
+
+/**
+ * How the URL for `next` should join the browser's history. A different article
+ * is somewhere else and earns its own entry, so the back button returns to the
+ * one before it. Everything else rewrites the entry in place: the same article
+ * opened again, the sensitivity moving, and the first URL this page writes over
+ * the one the browser already has, which `undefined` stands for.
+ */
+export function historyActionFor(
+  previous: SharedArticle | null | undefined,
+  next: SharedArticle | null,
+): "push" | "replace" {
+  if (previous === undefined) return "replace";
+  if (previous === null || next === null) return previous === next ? "replace" : "push";
+  return previous.lang === next.lang && previous.title === next.title ? "replace" : "push";
 }
 
 export function articleKey(lang: Lang, title: string): string {

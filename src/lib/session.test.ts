@@ -4,7 +4,9 @@ import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
   articleKey,
+  historyActionFor,
   policyForOpened,
+  readArticleTarget,
   readSessionStart,
   recordScanned,
   revealedOnPage,
@@ -203,5 +205,61 @@ describe("the disclosure ledgers", () => {
     const scanned = recordScanned(recordScanned([], other, "s4", ["p9.0"]), open, "s1", ["p1.0"]);
     expect(scannedForArticle(scanned, other)).toEqual(["s4"]);
     expect(scannedElsewhere(scanned, other)).toEqual([{ articleTitle: "Attack on Titan", sections: 1 }]);
+  });
+});
+
+describe("readArticleTarget", () => {
+  it("reads the article a URL names", () => {
+    expect(readArticleTarget("?lang=ja&title=シックス・センス&sensitivity=40")).toEqual({
+      lang: "ja",
+      title: "シックス・センス",
+    });
+  });
+
+  it("falls back to English when the language is not an edition the reader could pick", () => {
+    expect(readArticleTarget("?lang=xx&title=The%20Sixth%20Sense")).toEqual({
+      lang: "en",
+      title: "The Sixth Sense",
+    });
+  });
+
+  it("names no article when the URL carries no title", () => {
+    expect(readArticleTarget("?sensitivity=40")).toBeNull();
+  });
+});
+
+describe("historyActionFor", () => {
+  const titan = { lang: "en" as Lang, title: "Attack on Titan" };
+  const sixthSense = { lang: "en" as Lang, title: "The Sixth Sense" };
+
+  it("rewrites the entry the browser already has on the first URL this page writes", () => {
+    expect(historyActionFor(undefined, titan)).toBe("replace");
+    expect(historyActionFor(undefined, null)).toBe("replace");
+  });
+
+  it("gives another article its own entry, so back returns to this one", () => {
+    expect(historyActionFor(titan, sixthSense)).toBe("push");
+  });
+
+  it("treats the same title in another language as somewhere else", () => {
+    expect(historyActionFor({ lang: "en", title: "シックス・センス" }, { lang: "ja", title: "シックス・センス" })).toBe(
+      "push",
+    );
+  });
+
+  it("rewrites the entry in place when the same article is opened again", () => {
+    expect(historyActionFor(titan, { ...titan })).toBe("replace");
+  });
+
+  it("gives the first article opened from the search screen its own entry", () => {
+    expect(historyActionFor(null, titan)).toBe("push");
+  });
+
+  it("gives the search screen its own entry when the article closes", () => {
+    expect(historyActionFor(titan, null)).toBe("push");
+  });
+
+  it("rewrites the entry in place while no article is open", () => {
+    expect(historyActionFor(null, null)).toBe("replace");
   });
 });
