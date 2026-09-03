@@ -25,7 +25,7 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
   { lang: "en", title: "The Sixth Sense", note: "the lead paragraph already gives it away" },
   { lang: "en", title: "Fight Club (film)", note: "the twist is in the reception section" },
   { lang: "en", title: "Attack on Titan", note: "episode lists spoil four seasons at once" },
-  { lang: "ja", title: "シックス・センス", note: "日本語版でも同じことが起きる" },
+  { lang: "ja", title: "シックス・センス", note: "the Japanese edition gives it away the same way" },
 ];
 
 const LEVEL_KEY = "unspoiled.level";
