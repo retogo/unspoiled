@@ -8,7 +8,7 @@ export type Suggestions = {
   error: string | null;
   move: (step: -1 | 1) => void;
   searchNow: () => void;
-  clear: () => void;
+  dismiss: (settled: string) => void;
 };
 
 /**
@@ -65,7 +65,11 @@ export function useSuggestions(lang: Lang, term: string, composing: boolean): Su
     void run(lang, term);
   }, [lang, run, term]);
 
-  const clear = useCallback(() => setDismissed(term), [term]);
+  /**
+   * The suggestions are put away for one term: the one in the box when the reader presses Escape, and
+   * the one about to be in it when a title is dropped there. Neither is a question, so neither asks.
+   */
+  const dismiss = useCallback((settled: string) => setDismissed(settled), []);
 
-  return { hits, active, error: asking ? failure : null, move, searchNow, clear };
+  return { hits, active, error: asking ? failure : null, move, searchNow, dismiss };
 }

@@ -186,6 +186,56 @@ describe("the search box", () => {
     expect(options()).toHaveLength(0);
   });
 
+  it("holds the title of the suggestion it opened, and asks nothing more about it", async () => {
+    vi.mocked(searchArticles).mockResolvedValue(suggest("The Sixth Sense", "Sixth sense"));
+    render(<App />);
+    const input = searchBox();
+
+    await typeAndSettle(input, "sixth");
+    fireEvent.click(options()[0]);
+
+    expect(input.value).toBe("The Sixth Sense");
+    expect(options()).toHaveLength(0);
+
+    vi.mocked(searchArticles).mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(SUGGEST_DEBOUNCE_MS * 4);
+    });
+    expect(searchArticles).not.toHaveBeenCalled();
+  });
+
+  it("holds the title of the suggestion Enter opened, and asks nothing more about it", async () => {
+    vi.mocked(searchArticles).mockResolvedValue(suggest("The Sixth Sense", "Sixth sense"));
+    render(<App />);
+    const input = searchBox();
+
+    await typeAndSettle(input, "sixth");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe("Sixth sense");
+    expect(options()).toHaveLength(0);
+
+    vi.mocked(searchArticles).mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(SUGGEST_DEBOUNCE_MS * 4);
+    });
+    expect(searchArticles).not.toHaveBeenCalled();
+  });
+
+  it("offers the term it holds for replacing when the reader comes back to it", async () => {
+    vi.mocked(searchArticles).mockResolvedValue(suggest("The Sixth Sense"));
+    render(<App />);
+    const input = searchBox();
+
+    await typeAndSettle(input, "sixth");
+    fireEvent.click(options()[0]);
+    fireEvent.focus(input);
+
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe("The Sixth Sense".length);
+  });
+
   it("has no language menu and no search button to press", () => {
     render(<App />);
 

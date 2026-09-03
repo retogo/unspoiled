@@ -719,11 +719,25 @@ function SearchBox({
 }) {
   const [term, setTerm] = useState("");
   const [composing, setComposing] = useState(false);
-  const { hits, active, error, move, searchNow, clear } = useSuggestions(lang, term, composing);
+  const field = useRef<HTMLInputElement>(null);
+  /*
+   * Coming back to the field offers what it holds for replacing, so a term left over from the last
+   * search is typed over rather than edited around. Arriving by pointer waits for the button to come
+   * up before deciding: a click selects the term, and a drag keeps the range the reader drew. This is
+   * the ref that tells a press bringing the focus in from one inside a field that already has it.
+   */
+  const arriving = useRef(false);
+  const { hits, active, error, move, searchNow, dismiss } = useSuggestions(lang, term, composing);
 
-  const open = (title: string) => {
-    clear();
-    onOpen(title);
+  /*
+   * Opening a suggestion leaves its title in the field, so what the reader searched for becomes what
+   * they found. The title is the page answering rather than the reader asking, so it is dismissed as
+   * it is written: the box does not turn round and search for what it has just been handed.
+   */
+  const open = (chosen: string) => {
+    dismiss(chosen);
+    setTerm(chosen);
+    onOpen(chosen);
   };
 
   const steer = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -733,7 +747,7 @@ function SearchBox({
       if (chosen) open(chosen.title);
       else searchNow();
     } else if (event.key === "Escape") {
-      clear();
+      dismiss(term);
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       if (hits.length === 0) return;
       event.preventDefault();
@@ -745,7 +759,7 @@ function SearchBox({
     <div
       className="relative"
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) clear();
+        if (!event.currentTarget.contains(event.relatedTarget)) dismiss(term);
       }}
     >
       <div className="flex items-center gap-2 rounded-lg border border-edge bg-surface py-1 pr-1 pl-3 focus-within:border-edge-hover">
@@ -761,11 +775,23 @@ function SearchBox({
           <path d="M13 13 17 17" strokeLinecap="round" />
         </svg>
         <input
+          ref={field}
           value={term}
           onChange={(event) => setTerm(event.target.value)}
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
           onKeyDown={steer}
+          onMouseDown={() => {
+            arriving.current = document.activeElement !== field.current;
+          }}
+          onFocus={(event) => {
+            if (!arriving.current) event.currentTarget.select();
+          }}
+          onMouseUp={(event) => {
+            const drawn = event.currentTarget.selectionStart !== event.currentTarget.selectionEnd;
+            if (arriving.current && !drawn) event.currentTarget.select();
+            arriving.current = false;
+          }}
           placeholder="Search Wikipedia for a film, series or novel"
           role="combobox"
           aria-expanded={hits.length > 0}
