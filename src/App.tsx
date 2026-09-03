@@ -517,7 +517,7 @@ export default function App() {
         <div className="min-w-0">
           <SearchBox lang={lang} onLang={setLang} onOpen={(title) => void openArticle(lang, title)} />
 
-          {!article && (
+          {!article && !loading && (
             <div className="mt-4 flex flex-wrap gap-2">
               {DEMO_ARTICLES.map((demo) => (
                 <button
@@ -532,10 +532,10 @@ export default function App() {
             </div>
           )}
 
-          {loading && <p className="mt-6 text-sm text-muted">Loading…</p>}
+          {loading && <ArticleSkeleton />}
           {error && <p className="mt-6 text-sm text-alert-text">{error}</p>}
 
-          {article && (
+          {!loading && article && (
             <article className="mt-6">
               <h2 className="text-2xl font-semibold tracking-tight">{article.displayTitle}</h2>
               <p className="mt-1 text-xs text-muted">
@@ -831,6 +831,47 @@ function SearchBox({
         </ul>
       )}
     </div>
+  );
+}
+
+/**
+ * An article on its way, in the shape of the article it will be: the title, the line of counts under
+ * it, the lead paragraph that carries no heading of its own, then sections that do. Every band
+ * stands at the size and the leading the real text uses, so the words land about where the bands
+ * were rather than shifting the page as they arrive.
+ */
+const PENDING_SECTIONS = [
+  { heading: false, lines: ["w-full", "w-full", "w-2/3"] },
+  { heading: true, lines: ["w-full", "w-11/12", "w-full", "w-1/2"] },
+  { heading: true, lines: ["w-full", "w-full", "w-3/5"] },
+];
+
+const PENDING_BAND = "unspoiled-pending rounded bg-raised";
+
+function ArticleSkeleton() {
+  return (
+    <article aria-busy="true" className="mt-6">
+      <span className="sr-only">Loading article</span>
+      <div className={`${PENDING_BAND} h-8 w-1/2`} />
+      <div className={`${PENDING_BAND} mt-1 h-4 w-1/4`} />
+      {PENDING_SECTIONS.map((pending, section) => (
+        <section key={section} className="mt-6">
+          {pending.heading && (
+            <div className="border-b border-line pb-1">
+              <div className={`${PENDING_BAND} h-7 w-1/3`} />
+            </div>
+          )}
+          <div className="mt-3">
+            {/* A band the height of a glyph inside a row the height of a line, so the rhythm is the text's. */}
+            {pending.lines.map((width, line) => (
+              <div key={line} className="flex h-7 items-center">
+                <div className={`${PENDING_BAND} h-3 ${width}`} />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </article>
   );
 }
 
