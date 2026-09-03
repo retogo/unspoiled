@@ -10,7 +10,15 @@ import {
   isSectionKnown,
   type Policy,
 } from "./lib/risk";
-import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
+import {
+  segmentArticle,
+  sectionHeading,
+  type Article,
+  type Paragraph,
+  type Run,
+  type Section,
+  type Sentence,
+} from "./lib/segment";
 import {
   policyForOpened,
   readSessionStart,
@@ -505,8 +513,25 @@ export default function App() {
                   flowing={flowing}
                   onReveal={reveal}
                   onHide={hide}
+                  onOpen={(title) => void openArticle(article.lang, title)}
                 />
               ))}
+              {article.references.length > 0 && (
+                <section className="mt-8">
+                  <h3 className="border-b border-line pb-1 text-lg font-semibold">References</h3>
+                  <ol className="mt-3 list-decimal space-y-1.5 pl-6 text-xs text-muted marker:text-faint">
+                    {article.references.map((reference) => (
+                      <li key={reference.id} id={reference.id} className="scroll-mt-20">
+                        <RunsText
+                          runs={reference.runs}
+                          lang={article.lang}
+                          onOpen={(title) => void openArticle(article.lang, title)}
+                        />
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              )}
             </article>
           )}
         </div>
@@ -601,6 +626,7 @@ function SectionView({
   flowing,
   onReveal,
   onHide,
+  onOpen,
 }: {
   section: Section;
   policy: Policy;
@@ -608,6 +634,7 @@ function SectionView({
   flowing: ReadonlyMap<string, number>;
   onReveal: (sentenceIds: string[]) => void;
   onHide: (sentenceIds: string[]) => void;
+  onOpen: (title: string) => void;
 }) {
   const risk = assessSection(section);
   const known = isSectionKnown(policy, section.id);
@@ -631,6 +658,7 @@ function SectionView({
       opened={opened}
       onReveal={onReveal}
       onHide={onHide}
+      onOpen={onOpen}
     />
   );
 
@@ -691,6 +719,7 @@ function SectionView({
                     lang={lang}
                     start={flowing.get(sentence.id)}
                     onHide={policy.revealed.has(sentence.id) ? onHide : null}
+                    onOpen={onOpen}
                   />
                 )),
           )}
@@ -714,6 +743,9 @@ function closesOnClick(target: EventTarget | null): boolean {
   return (window.getSelection()?.toString() ?? "") === "";
 }
 
+/** Solid and tight against the words, so it reads apart from the dotted marker of an opened run. */
+const INLINE_LINK = "underline decoration-edge underline-offset-2 hover:decoration-ink";
+
 /**
  * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
  * arrives word by word and closes again on a tap. That control is named for the sentence rather
@@ -726,19 +758,23 @@ function SentenceView({
   lang,
   start,
   onHide,
+  onOpen,
   label = "Hide this sentence again",
 }: {
-  sentence: { id: string; text: string };
+  sentence: Sentence;
   lang: Lang;
   start: number | undefined;
   onHide: ((sentenceIds: string[]) => void) | null;
+  onOpen: (title: string) => void;
   label?: string;
 }) {
   const body =
     start === undefined ? (
-      <span className="unspoiled-text">{sentence.text}</span>
+      <span className="unspoiled-text">
+        <RunsText runs={sentence.runs} lang={lang} onOpen={onOpen} />
+      </span>
     ) : (
-      <FlowingText text={sentence.text} lang={lang} start={start} />
+      <FlowingText runs={sentence.runs} lang={lang} start={start} onOpen={onOpen} />
     );
 
   if (!onHide) {
@@ -773,19 +809,121 @@ function SentenceView({
   );
 }
 
-/** The words of an opened sentence, each set to arrive a beat after the one before it. */
-function FlowingText({ text, lang, start }: { text: string; lang: Lang; start: number }) {
-  const pieces = useMemo(() => flowPieces(text, lang), [lang, text]);
+/**
+ * A link stays a link once the text is on screen. An internal one opens the article here rather
+ * than on Wikipedia, where the reader would meet the ending unguarded; it is still written as an
+ * address so a middle click or a copied link shares the same reading. Nothing names the page a link
+ * leads to beyond the words already in the sentence: a link on "the boy" pointing at "Ghost" would
+ * give the film away before the reader followed it.
+ */
+function RunLink({
+  run,
+  lang,
+  onOpen,
+  children,
+}: {
+  run: Run;
+  lang: Lang;
+  onOpen: (title: string) => void;
+  children: ReactNode;
+}) {
+  if (run.kind === "wiki") {
+    return (
+      <a
+        href={`?${new URLSearchParams({ lang, title: run.title })}`}
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+          event.preventDefault();
+          onOpen(run.title);
+        }}
+        className={INLINE_LINK}
+      >
+        {children}
+      </a>
+    );
+  }
+  if (run.kind === "external") {
+    return (
+      <a href={run.href} target="_blank" rel="noopener noreferrer" className={INLINE_LINK}>
+        {children}
+        <span aria-hidden="true" className="ml-0.5 align-super text-[0.65em] text-muted">
+          &#8599;
+        </span>
+      </a>
+    );
+  }
+  if (run.kind === "note") {
+    return (
+      <sup className="mx-px">
+        <a href={`#${run.noteId}`} className="text-[0.85em] text-muted hover:text-ink">
+          {children}
+        </a>
+      </sup>
+    );
+  }
+  return <>{children}</>;
+}
+
+/** Text that is already on screen, with its links and citation markers where the article put them. */
+function RunsText({
+  runs,
+  lang,
+  onOpen,
+}: {
+  runs: Run[];
+  lang: Lang;
+  onOpen: (title: string) => void;
+}) {
   return (
     <>
-      {pieces.map((piece, index) => (
-        <span
-          key={`${index}:${piece}`}
-          className="unspoiled-flow"
-          style={{ animationDelay: `${flowDelay(index, pieces.length, start)}ms` }}
-        >
-          {piece}
-        </span>
+      {runs.map((run, index) => (
+        <RunLink key={index} run={run} lang={lang} onOpen={onOpen}>
+          {run.text}
+        </RunLink>
+      ))}
+    </>
+  );
+}
+
+/**
+ * The words of an opened sentence, each set to arrive a beat after the one before it. Splitting into
+ * words happens inside a run so a link is never cut in half, and the beats keep counting across the
+ * runs so the sentence still arrives front to back.
+ */
+function FlowingText({
+  runs,
+  lang,
+  start,
+  onOpen,
+}: {
+  runs: Run[];
+  lang: Lang;
+  start: number;
+  onOpen: (title: string) => void;
+}) {
+  const timed = useMemo(() => {
+    const split = runs.map((run) => (run.kind === "note" ? [run.text] : flowPieces(run.text, lang)));
+    const count = split.reduce((total, pieces) => total + pieces.length, 0);
+    let index = 0;
+    return split.map((pieces) =>
+      pieces.map((piece) => ({ piece, delay: flowDelay(index++, count, start) })),
+    );
+  }, [lang, runs, start]);
+
+  return (
+    <>
+      {runs.map((run, at) => (
+        <RunLink key={at} run={run} lang={lang} onOpen={onOpen}>
+          {timed[at].map(({ piece, delay }, index) => (
+            <span
+              key={`${index}:${piece}`}
+              className="unspoiled-flow"
+              style={{ animationDelay: `${delay}ms` }}
+            >
+              {piece}
+            </span>
+          ))}
+        </RunLink>
       ))}
     </>
   );
@@ -801,6 +939,7 @@ function SectionHeading({
   opened,
   onReveal,
   onHide,
+  onOpen,
 }: {
   section: Section;
   hidden: number;
@@ -811,15 +950,18 @@ function SectionHeading({
   opened: string[];
   onReveal: (ids: string[]) => void;
   onHide: (ids: string[]) => void;
+  onOpen: (title: string) => void;
 }) {
   const withheldHeading = hiddenHeading(section, policy);
   const id = headingId(section);
+  const text = sectionHeading(section);
   const heading = policy.revealed.has(id) ? (
     <SentenceView
-      sentence={{ id, text: sectionHeading(section) }}
+      sentence={{ id, text, runs: [{ kind: "text", text }] }}
       lang={lang}
       start={flowing.get(id)}
       onHide={onHide}
+      onOpen={onOpen}
       label="Hide this heading again"
     />
   ) : (
@@ -866,7 +1008,7 @@ type SentenceRun = {
   key: string;
   hidden: boolean;
   reason?: string;
-  sentences: { id: string; text: string }[];
+  sentences: Sentence[];
 };
 
 function groupSentences(paragraph: Paragraph, section: Section, policy: Policy): SentenceRun[] {
