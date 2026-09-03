@@ -419,7 +419,7 @@ function SectionView({
     return (
       <section className="mt-6">
         <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
-        <p className="mt-2 text-xs text-zinc-500">
+        <p className="unspoiled-mask mt-2 text-xs text-zinc-500">
           {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
           open only as far as you have watched.
         </p>
@@ -428,7 +428,7 @@ function SectionView({
             <button
               key={paragraph.id}
               onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
-              className="flex w-full items-baseline gap-2 rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-left text-xs text-zinc-600 hover:border-zinc-400"
+              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-left text-xs text-zinc-600 hover:border-zinc-400"
             >
               <span className="font-medium">Paragraph {index + 1}</span>
               <span className="text-zinc-400">
@@ -454,14 +454,17 @@ function SectionView({
                 key={run.key}
                 onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
                 title={run.reason}
-                className="mx-0.5 rounded bg-zinc-200 px-2 py-0.5 align-baseline text-xs text-zinc-600 hover:bg-zinc-300"
+                className="unspoiled-mask mx-0.5 rounded bg-zinc-200 px-2 py-0.5 align-baseline text-xs text-zinc-600 hover:bg-zinc-300"
               >
                 {run.sentences.length === 1 ? "1 sentence" : `${run.sentences.length} sentences`} withheld · reveal
               </button>
             ) : (
-              <span key={run.key}>
-                {run.sentences.map((sentence) => sentence.text).join(" ")}{" "}
-              </span>
+              /* One span per sentence, so only the sentences that just appeared animate in. */
+              run.sentences.map((sentence) => (
+                <span key={sentence.id} className="unspoiled-text">
+                  {sentence.text}{" "}
+                </span>
+              ))
             ),
           )}
         </p>
@@ -490,7 +493,7 @@ function SectionHeading({
         <button
           onClick={() => onReveal([headingId(section)])}
           title={withheldHeading.reason}
-          className="rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
+          className="unspoiled-mask rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
         >
           Heading withheld · reveal
         </button>
@@ -527,9 +530,10 @@ function groupSentences(paragraph: Paragraph, section: Section, policy: Policy):
     const last = runs[runs.length - 1];
     if (last && last.hidden === hidden) {
       last.sentences.push(sentence);
+      last.key = `${last.sentences[0].id}.${last.sentences.length}`;
       continue;
     }
-    runs.push({ key: sentence.id, hidden, reason: withheld?.reason, sentences: [sentence] });
+    runs.push({ key: `${sentence.id}.1`, hidden, reason: withheld?.reason, sentences: [sentence] });
   }
   return runs;
 }
