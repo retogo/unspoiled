@@ -19,25 +19,31 @@ at the root). The reader must work with no agent attached; the tools are an addi
 
 ## Invariants (the product claim; break one and the project is pointless)
 
-- No tool returns withheld sentence text or a withheld heading by default. The only doors are
-  `read_withheld_section` (refuses without `acknowledge: true`) and `reveal_withheld_sentences`.
-  Both must record the sections opened so they appear under "Your agent has read".
-- Nothing returned to the agent may repeat a withheld heading: not `heading`, not a `reason`,
-  not a search `evidence` row. Reasons are fixed phrases, never templates with the heading in them.
+- The agent reads the whole article, spoilers included, and decides what the reader sees. That is
+  the task, not a leak. `read_article_content` returns every sentence of what it is asked for.
+- Precedence when deciding whether a sentence shows: `hidden` beats `shown`, and both beat the
+  page's wording rules. A decision therefore holds at every sensitivity, including zero.
+- `apply_mask` applies one decision in one call: sections, paragraphs and sentences on either
+  side, `hide` winning where a sentence is named on both. The `reason` is required and is never
+  blank — the page has nothing to show the reader without it.
+- Every decision reaches the screen. The reason and the counts appear under "Your agent's
+  decisions", opened sentences under "Revealed on your page", and every section
+  `read_article_content` touched under "Your agent has read". Never filter silently.
+- The reader outranks everyone: a tap lands in the same two sets, so it can take back what the
+  agent decided. Only `apply_mask` writes to `decisions`.
 - Withheld text is never in the DOM. Render placeholders; never blur or hide real text with CSS.
-- Everything the agent asserts about the reader (`already_knows`, `because`, notes) is shown on
-  screen with a way to correct it. Never profile the reader silently.
-- Precedence when deciding whether a sentence shows: the reader's explicit choice (revealed,
-  known section, or the most open policy) beats the agent's `withhold_article_content`, which
-  beats the page's wording heuristics. Headings follow the same order as sentences.
-- Sentence and section ids (`s3`, `p12.4`, `s3.heading`) are positional and valid only for the
+- Sentence, paragraph and section ids (`s3`, `p12`, `p12.4`) are positional and valid only for the
   article currently open. Reset article-scoped policy on article change; never trust ids from a URL.
-- Tool names say what they hand the agent (`get_visible_section_text`, `read_withheld_section`).
-  Never name anything "safe": the wording rules miss spoilers, and visible does not mean spoiler-free.
+  Sensitivity belongs to the reader and survives the change.
+- Sensitivity is the reader's control, and the safety net for a reader with no agent attached.
+  No tool sets it; `get_masking_report` reports it.
+- Tool names say what they hand the agent (`read_article_content`, `apply_mask`). Never name
+  anything "safe": the wording rules miss spoilers, and shown does not mean spoiler-free.
 - Tool descriptions are the only channel the page has to steer an agent. Each one names the call
-  that should come next. Treat them as product copy and update them with every behaviour change.
-- Withholding protects against accidental exposure through the agent, not against a reader who
-  opens view-source. Do not describe it as a security boundary.
+  that should come next, and `read_article_content` is where the agent is told not to repeat what
+  it read. Treat them as product copy and update them with every behaviour change.
+- Masking protects against accidental exposure through the agent, not against a reader who opens
+  view-source. Do not describe it as a security boundary.
 
 ## WebMCP as shipped in Chrome (measured, not read from drafts)
 
