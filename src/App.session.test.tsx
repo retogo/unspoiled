@@ -32,6 +32,25 @@ function installAgent(holder: object = document) {
   return { registered, context };
 }
 
+/**
+ * Chrome exposes no `unregisterTool`, and a second `registerTool` for a name it
+ * already holds rejects with `InvalidStateError: Duplicate tool name`.
+ */
+function installChromeAgent() {
+  const registered: WebMcpTool[] = [];
+  const context = {
+    registerTool: vi.fn((tool: WebMcpTool) => {
+      if (registered.some((candidate) => candidate.name === tool.name)) {
+        return Promise.reject(new DOMException("Duplicate tool name", "InvalidStateError"));
+      }
+      registered.push(tool);
+      return Promise.resolve();
+    }),
+  };
+  Object.defineProperty(document, "modelContext", { value: context, configurable: true, writable: true });
+  return { registered };
+}
+
 function installFailingAgent(error: Error) {
   Object.defineProperty(document, "modelContext", {
     value: {
@@ -224,7 +243,22 @@ describe("exposing the tools to an agent", () => {
   });
 
   it("exposes each tool once when React mounts the page twice", async () => {
-    const { registered } = installAgent();
+    const { registered } = installChromeAgent();
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByText(/tools exposed via document.modelContext/)).toBeTruthy());
+    const names = registered.map((tool) => tool.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(screen.getByText(`${names.length} tools exposed via document.modelContext`)).toBeTruthy();
+  });
+
+  it("answers through the live page after React mounts it twice", async () => {
+    const { registered } = installChromeAgent();
 
     render(
       <StrictMode>
@@ -233,8 +267,9 @@ describe("exposing the tools to an agent", () => {
     );
 
     await waitFor(() => expect(registered.length).toBeGreaterThan(0));
-    const names = registered.map((tool) => tool.name);
-    expect(new Set(names).size).toBe(names.length);
+    await openArticle(registered, "en", "Attack on Titan");
+
+    expect(screen.getByText(/Attack on Titan is a Japanese manga series/)).toBeTruthy();
   });
 
   it("tells the reader when the browser refused the tools", async () => {

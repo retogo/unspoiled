@@ -43,11 +43,30 @@ function modelContext(): Holder | undefined {
   return undefined;
 }
 
+type LiveTool = { definition: ToolDefinition; onCall: (call: ToolCall) => void };
+
 /**
- * Registering and unregistering are queued so they reach the browser in the
- * order they were asked for. React mounts the page twice in development, and
- * without a queue the first mount's cleanup could arrive after the second
- * mount's registration and take the live tools away.
+ * Chrome keeps a tool for the life of the page: there is no `unregisterTool`,
+ * and registering a name twice is refused. A name is therefore handed to the
+ * browser once, and the handler it gets looks the definition up here on every
+ * call so it always runs the one the page is offering now.
+ */
+const live = new Map<string, LiveTool>();
+
+const exposedNames = new WeakMap<ModelContextLike, Set<string>>();
+
+function exposedBy(context: ModelContextLike): Set<string> {
+  const known = exposedNames.get(context);
+  if (known) return known;
+  const fresh = new Set<string>();
+  exposedNames.set(context, fresh);
+  return fresh;
+}
+
+/**
+ * Work reaches the browser in the order it was asked for. React mounts the page
+ * twice in development, so the first mount's cleanup must not overtake the
+ * second mount's registration.
  */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -72,6 +91,10 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
+function isDuplicateName(cause: unknown): boolean {
+  return (cause as { name?: unknown } | null)?.name === "InvalidStateError";
+}
+
 type Outcome = { ok: boolean; value: unknown };
 
 async function runTool(definition: ToolDefinition, input: Record<string, unknown>): Promise<Outcome> {
@@ -82,47 +105,70 @@ async function runTool(definition: ToolDefinition, input: Record<string, unknown
   }
 }
 
+function reply(value: unknown, ok: boolean) {
+  const content = [{ type: "text", text: JSON.stringify(value) }];
+  return ok ? { content } : { content, isError: true };
+}
+
+function dispatch(name: string) {
+  return async (raw: unknown) => {
+    const entry = live.get(name);
+    if (!entry) return reply({ error: "This tool is no longer offered by the page." }, false);
+    const input = parseInput(raw);
+    const { ok, value } = await runTool(entry.definition, input);
+    const text = JSON.stringify(value);
+    entry.onCall({ at: Date.now(), tool: name, input: JSON.stringify(input), ok, summary: `${text.length} chars` });
+    return reply(value, ok);
+  };
+}
+
 export function registerTools(definitions: ToolDefinition[], onCall: (call: ToolCall) => void): Registration {
+  for (const definition of definitions) live.set(definition.name, { definition, onCall });
+  const forget = () => {
+    for (const definition of definitions) live.delete(definition.name);
+  };
+
   const holder = modelContext();
   if (!holder) {
-    return { ready: Promise.resolve({ api: "unavailable", toolCount: 0 }), unregister: () => {} };
+    return { ready: Promise.resolve({ api: "unavailable", toolCount: 0 }), unregister: forget };
   }
   const { api, context } = holder;
+  const exposed = exposedBy(context);
 
   const outcomes = definitions.map((definition) =>
-    enqueue(async () =>
-      context.registerTool({
-        name: definition.name,
-        description: definition.description,
-        inputSchema: definition.inputSchema,
-        execute: async (raw: unknown) => {
-          const input = parseInput(raw);
-          const { ok, value } = await runTool(definition, input);
-          const text = JSON.stringify(value);
-          onCall({
-            at: Date.now(),
-            tool: definition.name,
-            input: JSON.stringify(input),
-            ok,
-            summary: `${text.length} chars`,
-          });
-          const content = [{ type: "text", text }];
-          return ok ? { content } : { content, isError: true };
-        },
-      }),
-    ),
+    enqueue(async () => {
+      if (exposed.has(definition.name)) return;
+      try {
+        await context.registerTool({
+          name: definition.name,
+          description: definition.description,
+          inputSchema: definition.inputSchema,
+          execute: dispatch(definition.name),
+        });
+      } catch (cause) {
+        if (!isDuplicateName(cause)) throw cause;
+      }
+      exposed.add(definition.name);
+    }),
   );
 
   const ready = Promise.allSettled(outcomes).then((settled) => {
     const errors = settled.flatMap((outcome) => (outcome.status === "rejected" ? [message(outcome.reason)] : []));
-    return { api, toolCount: settled.length - errors.length, error: errors[0] };
+    const toolCount = definitions.filter((definition) => exposed.has(definition.name)).length;
+    return { api, toolCount, error: errors[0] };
   });
 
+  const takeBack = context.unregisterTool;
   return {
     ready,
     unregister: () => {
+      forget();
+      if (!takeBack) return;
       for (const definition of definitions) {
-        void enqueue(async () => context.unregisterTool?.(definition.name));
+        void enqueue(async () => {
+          await takeBack.call(context, definition.name);
+          exposed.delete(definition.name);
+        });
       }
     },
   };

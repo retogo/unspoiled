@@ -84,3 +84,92 @@ describe("the record of a call", () => {
     expect(calls[0].ok).toBe(true);
   });
 });
+
+/**
+ * Chrome exposes no `unregisterTool`, and a second `registerTool` for a name it
+ * already holds rejects with `InvalidStateError: Duplicate tool name`.
+ */
+function installChromeAgent(alreadyInBrowser: string[] = []) {
+  const names = new Set(alreadyInBrowser);
+  const registered: RegisteredTool[] = [];
+  Object.defineProperty(document, "modelContext", {
+    configurable: true,
+    writable: true,
+    value: {
+      registerTool: (candidate: RegisteredTool) => {
+        if (names.has(candidate.name)) {
+          return Promise.reject(new DOMException("Duplicate tool name", "InvalidStateError"));
+        }
+        names.add(candidate.name);
+        registered.push(candidate);
+        return Promise.resolve();
+      },
+      getTools: () => Promise.resolve([...names].map((name) => ({ name }))),
+    },
+  });
+  return { registered };
+}
+
+describe("registering the same tools again", () => {
+  it("leaves every tool exposed and reports no error", async () => {
+    const { registered } = installChromeAgent();
+    const definitions = () => [tool("list_sections", () => ({ sections: [] })), tool("get_article_outline", () => ({}))];
+
+    await registerTools(definitions(), () => {}).ready;
+    const second = await registerTools(definitions(), () => {}).ready;
+
+    expect(second.error).toBeUndefined();
+    expect(second.toolCount).toBe(2);
+    expect(registered).toHaveLength(2);
+  });
+
+  it("makes the browser call the newest definition", async () => {
+    const { registered } = installChromeAgent();
+    const calls: ToolCall[] = [];
+
+    await registerTools([tool("get_masking_report", () => ({ hidden: 1 }))], () => {}).ready;
+    await registerTools([tool("get_masking_report", () => ({ hidden: 2 }))], (call) => calls.push(call)).ready;
+
+    const result = await registered[0].execute("{}");
+
+    expect(JSON.parse(result.content[0].text)).toEqual({ hidden: 2 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("counts a name the browser already holds as exposed", async () => {
+    const { registered } = installChromeAgent(["read_withheld_section"]);
+
+    const state = await registerTools([tool("read_withheld_section", () => ({}))], () => {}).ready;
+
+    expect(state.error).toBeUndefined();
+    expect(state.toolCount).toBe(1);
+    expect(registered).toHaveLength(0);
+  });
+
+  it("still reports a refusal that is not a duplicate name", async () => {
+    Object.defineProperty(document, "modelContext", {
+      configurable: true,
+      writable: true,
+      value: { registerTool: () => Promise.reject(new Error("Tool limit reached")) },
+    });
+
+    const state = await registerTools([tool("list_sections", () => ({}))], () => {}).ready;
+
+    expect(state.error).toBe("Tool limit reached");
+    expect(state.toolCount).toBe(0);
+  });
+});
+
+describe("a tool the page has taken back", () => {
+  it("tells the agent it is no longer offered instead of running the old handler", async () => {
+    const { registered } = installChromeAgent();
+    const registration = registerTools([tool("reveal_withheld_sentences", () => ({ revealed: 4 }))], () => {});
+    await registration.ready;
+
+    registration.unregister();
+    const result = await registered[0].execute("{}");
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({ error: "This tool is no longer offered by the page." });
+  });
+});
