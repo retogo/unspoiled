@@ -141,6 +141,9 @@ export function assessSentences(section: Section): ReadonlyMap<string, Assessmen
  */
 export type Decision = {
   at: number;
+  /** The article it was made on: the log outlives the article, the ids in it do not. */
+  articleKey: string;
+  articleTitle: string;
   show: string[];
   hide: string[];
   reason: string;

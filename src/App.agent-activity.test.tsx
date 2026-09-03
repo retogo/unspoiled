@@ -334,6 +334,19 @@ describe("the activity drawer under the article", () => {
     expect(screen.getByText(/^Agent activity · 2 decisions/)).toBeTruthy();
   });
 
+  it("names the article a decision was made on, when it was not this one", async () => {
+    const { call, open } = await readerWithAgent();
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+
+    await open("Another Film");
+    await call("apply_mask", { hide: { sentence_ids: ["p1.1"] }, reason: "you asked not to know her errand" });
+
+    const rows = screen.getByRole("heading", { name: "Decisions" }).parentElement?.querySelectorAll("li");
+    expect(rows?.[0].textContent).toContain("you asked not to know her errand");
+    expect(rows?.[0].textContent).not.toContain("The Test Film");
+    expect(rows?.[1].textContent).toContain("in The Test Film");
+  });
+
   it("is not there before an article is open", async () => {
     installAgent();
     render(<App />);

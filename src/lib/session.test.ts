@@ -28,7 +28,16 @@ const usedPolicy: Policy = {
   sensitivity: 50,
   shown: new Set(["p1.0"]),
   hidden: new Set(["p2.1"]),
-  decisions: [{ at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" }],
+  decisions: [
+    {
+      at: 0,
+      articleKey: articleKey("en", "Attack on Titan"),
+      articleTitle: "Attack on Titan",
+      show: ["p1.0"],
+      hide: ["p2.1"],
+      reason: "you have watched the first season",
+    },
+  ],
 };
 
 describe("readSessionStart", () => {

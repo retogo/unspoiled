@@ -32,6 +32,7 @@ import {
   type Sentence,
 } from "./lib/segment";
 import {
+  articleKey,
   historyActionFor,
   policyForOpened,
   readArticleTarget,
@@ -581,6 +582,7 @@ export default function App() {
           {article && (
             <AgentActivity
               decisions={policy.decisions}
+              openKey={articleKey(article.lang, article.title)}
               calls={calls}
               elsewhere={elsewhere}
               drawerRef={activityRef}
@@ -650,11 +652,13 @@ function ReadWarning({ sections }: { sections: string[] }) {
  */
 function AgentActivity({
   decisions,
+  openKey,
   calls,
   elsewhere,
   drawerRef,
 }: {
   decisions: Decision[];
+  openKey: string;
   calls: ToolCall[];
   elsewhere: { articleTitle: string; sections: number }[];
   drawerRef: RefObject<HTMLDetailsElement | null>;
@@ -675,6 +679,8 @@ function AgentActivity({
                 <li key={newestFirst.length - index} className="rounded-lg bg-paper px-3 py-2">
                   <span className="block tabular-nums text-muted">
                     {atTime(decision.at)} · {decision.show.length} shown · {decision.hide.length} hidden
+                    {/* Which article, for a decision whose ids no longer name anything on screen. */}
+                    {decision.articleKey !== openKey && ` · in ${decision.articleTitle}`}
                   </span>
                   <span className="block">{decision.reason}</span>
                 </li>

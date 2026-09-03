@@ -32,7 +32,9 @@ at the root). The reader must work with no agent attached; the tools are an addi
   reader cannot disagree with.
 - "Agent activity" is the one complete record: every call, in the order it was made, with its
   counts and the whole of its reason, for the length of the session. The notice that carries a
-  decision past the reader is a summary of one call and nothing is kept only there.
+  decision past the reader is a summary of one call and nothing is kept only there. A decision made
+  on another article keeps its place in that list and is named with the article it was made on;
+  `get_masking_report` reports only the decisions of the article open, whose ids still mean something.
 - Every decision reaches the screen, and where it goes is set by what the reader cannot afford to
   miss. The sections `read_article_content` touched are named in front of the article, under
   "Your agent has read:", for as long as that article is open, and there is nothing to dismiss them
