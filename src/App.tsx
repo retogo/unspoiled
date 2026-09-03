@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flowDelay, flowRuns, flowTimings, flowWords, type FlowTiming } from "./lib/flow";
 import { bottomOverlap, scrollToFollow } from "./lib/scroll";
 import { maskRows } from "./lib/mask";
@@ -307,7 +307,11 @@ export default function App() {
   }, []);
 
   const revealedBefore = useRef(policy.revealed);
-  useEffect(() => {
+  /*
+   * Runs before the browser paints: the sentences a reveal opens must be drawn as flowing words
+   * from their very first frame, or the whole sentence shows for an instant before the words start.
+   */
+  useLayoutEffect(() => {
     const before = revealedBefore.current;
     revealedBefore.current = policy.revealed;
     const opened = [...policy.revealed].filter((id) => !before.has(id));
