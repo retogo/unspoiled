@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { flowDelay, flowRuns, flowStarts, flowWords } from "./lib/flow";
+import { flowDelay, flowRuns, flowTimings, flowWords, type FlowTiming } from "./lib/flow";
+import { bottomOverlap, scrollToFollow } from "./lib/scroll";
 import { maskRows } from "./lib/mask";
 import {
   assessSection,
@@ -91,6 +92,19 @@ function runsById(article: Article | null): Map<string, Run[]> {
   return runs;
 }
 
+/** Scrolling the page from the keyboard is the reader taking it back, the same as reaching for it. */
+const SCROLL_KEYS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
+
+/**
+ * How much of the foot of the window the policy panel is sitting over. Below `lg` it is pinned
+ * across the bottom of the screen; wider than that it is part of the sidebar and covers nothing.
+ */
+function bottomInset(): number {
+  const panel = document.getElementById("sensitivity")?.closest("div");
+  if (!panel) return 0;
+  return bottomOverlap(panel.getBoundingClientRect(), window.innerHeight);
+}
+
 function sentenceCount(sentences: number): string {
   return sentences === 1 ? "1 sentence" : `${sentences} sentences`;
 }
@@ -113,7 +127,7 @@ export default function App() {
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
-  const [flowing, setFlowing] = useState<ReadonlyMap<string, number>>(new Map());
+  const [flowing, setFlowing] = useState<ReadonlyMap<string, FlowTiming>>(new Map());
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
 
   const articleRef = useRef<Article | null>(null);
@@ -260,6 +274,38 @@ export default function App() {
    * another, each waiting only as long as the sentence in front of it actually runs. The slider can
    * open hundreds at once and never touches `revealed`, so those keep the plain fade.
    */
+  /**
+   * A reveal that runs past the foot of the window carries the page down with it, so the reader
+   * watches the words arrive rather than guessing where they went. The moment they scroll for
+   * themselves the page is theirs again, until the next reveal asks for it.
+   */
+  const followRef = useRef(false);
+  useEffect(() => {
+    const follow = (event: Event) => {
+      if (!followRef.current) return;
+      const word = event.target;
+      if (!(word instanceof HTMLElement) || !word.classList.contains("unspoiled-flow")) return;
+      const by = scrollToFollow(word.getBoundingClientRect().bottom, window.innerHeight, bottomInset());
+      if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+    };
+    const release = () => {
+      followRef.current = false;
+    };
+    const releaseOnKey = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.includes(event.key)) release();
+    };
+    document.addEventListener("animationstart", follow);
+    window.addEventListener("wheel", release, { passive: true });
+    window.addEventListener("touchmove", release, { passive: true });
+    window.addEventListener("keydown", releaseOnKey);
+    return () => {
+      document.removeEventListener("animationstart", follow);
+      window.removeEventListener("wheel", release);
+      window.removeEventListener("touchmove", release);
+      window.removeEventListener("keydown", releaseOnKey);
+    };
+  }, []);
+
   const revealedBefore = useRef(policy.revealed);
   useEffect(() => {
     const before = revealedBefore.current;
@@ -267,14 +313,15 @@ export default function App() {
     const opened = [...policy.revealed].filter((id) => !before.has(id));
     const closed = [...before].filter((id) => !policy.revealed.has(id));
     if (opened.length === 0 && closed.length === 0) return;
+    followRef.current = opened.length > 0;
     const article = articleRef.current;
     const runs = runsById(article);
     const lang = article?.lang ?? "en";
     setFlowing((current) => {
       const next = new Map(current);
       for (const id of closed) next.delete(id);
-      const starts = flowStarts(opened.map((id) => flowWords(flowRuns(runs.get(id) ?? [], lang))));
-      opened.forEach((id, order) => next.set(id, starts[order]));
+      const timings = flowTimings(opened.map((id) => flowWords(flowRuns(runs.get(id) ?? [], lang))));
+      opened.forEach((id, order) => next.set(id, timings[order]));
       return next;
     });
   }, [policy.revealed]);
@@ -650,7 +697,7 @@ function SectionView({
   section: Section;
   policy: Policy;
   lang: Lang;
-  flowing: ReadonlyMap<string, number>;
+  flowing: ReadonlyMap<string, FlowTiming>;
   onReveal: (sentenceIds: string[]) => void;
   onHide: (sentenceIds: string[]) => void;
   onOpen: (title: string) => void;
@@ -721,7 +768,7 @@ function SectionView({
                       key={sentence.id}
                       sentence={sentence}
                       lang={lang}
-                      start={flowing.get(sentence.id)}
+                      timing={flowing.get(sentence.id)}
                       onHide={policy.revealed.has(sentence.id) ? onHide : null}
                       onOpen={onOpen}
                     />
@@ -785,25 +832,25 @@ const INLINE_LINK = "underline decoration-edge underline-offset-2 hover:decorati
 function SentenceView({
   sentence,
   lang,
-  start,
+  timing,
   onHide,
   onOpen,
   label = "Hide this sentence again",
 }: {
   sentence: Sentence;
   lang: Lang;
-  start: number | undefined;
+  timing: FlowTiming | undefined;
   onHide: ((sentenceIds: string[]) => void) | null;
   onOpen: (title: string) => void;
   label?: string;
 }) {
   const body =
-    start === undefined ? (
+    timing === undefined ? (
       <span className="unspoiled-text">
         <RunsText runs={sentence.runs} lang={lang} onOpen={onOpen} />
       </span>
     ) : (
-      <FlowingText runs={sentence.runs} lang={lang} start={start} onOpen={onOpen} />
+      <FlowingText runs={sentence.runs} lang={lang} timing={timing} onOpen={onOpen} />
     );
 
   if (!onHide) {
@@ -917,27 +964,25 @@ function RunsText({
 /**
  * The words of an opened sentence, each set to arrive a beat after the one before it. Splitting into
  * words happens inside a run so a link is never cut in half, and the beats keep counting across the
- * runs so the sentence still arrives front to back.
+ * runs, and on from where the sentence before it left off.
  */
 function FlowingText({
   runs,
   lang,
-  start,
+  timing,
   onOpen,
 }: {
   runs: Run[];
   lang: Lang;
-  start: number;
+  timing: FlowTiming;
   onOpen: (title: string) => void;
 }) {
   const timed = useMemo(() => {
-    const split = flowRuns(runs, lang);
-    const count = flowWords(split);
     let index = 0;
-    return split.map((pieces) =>
-      pieces.map((piece) => ({ piece, delay: flowDelay(index++, count, start) })),
+    return flowRuns(runs, lang).map((pieces) =>
+      pieces.map((piece) => ({ piece, delay: flowDelay(index++, timing) })),
     );
-  }, [lang, runs, start]);
+  }, [lang, runs, timing]);
 
   return (
     <>
@@ -975,7 +1020,7 @@ function SectionHeading({
   known: string | null;
   policy: Policy;
   lang: Lang;
-  flowing: ReadonlyMap<string, number>;
+  flowing: ReadonlyMap<string, FlowTiming>;
   opened: string[];
   onReveal: (ids: string[]) => void;
   onHide: (ids: string[]) => void;
@@ -988,7 +1033,7 @@ function SectionHeading({
     <SentenceView
       sentence={{ id, text, runs: [{ kind: "text", text }] }}
       lang={lang}
-      start={flowing.get(id)}
+      timing={flowing.get(id)}
       onHide={onHide}
       onOpen={onOpen}
       label="Hide this heading again"
