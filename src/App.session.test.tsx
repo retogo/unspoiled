@@ -176,7 +176,10 @@ describe("opening another article", () => {
     await openArticle(registered, "en", "The Sixth Sense");
 
     expect(screen.queryByText(/Malcolm Crowe has been a ghost/)).toBeNull();
-    expect(screen.queryByText("you have finished season 1")).toBeNull();
+    expect(articleText()).not.toContain("you have finished season 1");
+    /* The decision no longer applies here, but having made it is a fact about the session. */
+    const decided = screen.getByRole("heading", { name: "Decisions" }).parentElement?.textContent ?? "";
+    expect(decided).toContain("you have finished season 1");
   });
 
   it("does not let sentences hidden in one article hide sentences in the next", async () => {
@@ -296,11 +299,12 @@ describe("exposing the tools to an agent", () => {
 
   it("shows the reader which calls failed", async () => {
     const registered = await renderWithAgent();
-    await callTool(registered, "open_article");
+    await openArticle(registered, "en", "Attack on Titan");
+    await callTool(registered, "read_article_content", { section_ids: ["s9"] });
 
-    const panel = screen.getByRole("heading", { name: "Tool activity" }).parentElement;
-    expect(panel?.textContent).toContain("open_article");
-    expect(panel?.textContent).toContain("error");
+    const logged = screen.getByRole("heading", { name: "Tool calls" }).parentElement?.textContent ?? "";
+    expect(logged).toContain("read_article_content");
+    expect(logged).toContain("error");
   });
 
   it("names the holder the tools were actually registered on", async () => {
@@ -393,11 +397,11 @@ describe("the record of what the agent has read", () => {
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "read_article_content", { section_ids: ["s2"] });
-    expect(screen.getByText(/It knows those spoilers/)).toBeTruthy();
+    expect(screen.getByText("Your agent has read: Plot")).toBeTruthy();
 
     await openArticle(registered, "en", "Attack on Titan");
 
-    expect(screen.getByText(/It knows those spoilers/)).toBeTruthy();
+    expect(screen.getByText("Your agent has read: Plot")).toBeTruthy();
     const report = await callTool(registered, "get_masking_report");
     expect(report.sections_read).toEqual(["s2"]);
   });
@@ -435,8 +439,8 @@ describe("the record of what the agent has read", () => {
 
     await openArticle(registered, "en", "The Sixth Sense");
 
-    const panel = screen.getByRole("heading", { name: "Your agent has read" }).parentElement;
-    expect(panel?.textContent).toContain("Attack on Titan — 1 section");
+    const elsewhere = screen.getByRole("heading", { name: "Read elsewhere" }).parentElement?.textContent ?? "";
+    expect(elsewhere).toContain("Attack on Titan — 1 section");
   });
 
   it("leaves the sections it read withheld on the page", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Article, Section } from "./segment";
+import { DEFAULT_SENSITIVITY, type Policy } from "./risk";
+import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
   articleKey,
@@ -9,33 +9,18 @@ import {
   readArticleTarget,
   readSessionStart,
   recordScanned,
-  revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
 } from "./session";
 
-function article(lang: Lang, title: string, sections: Section[] = []): Article {
+function article(lang: Lang, title: string): Article {
   return {
     lang,
     title,
     displayTitle: title,
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${title}`,
-    sections,
+    sections: [],
     references: [],
-  };
-}
-
-function section(id: string, heading: string, sentenceIds: string[]): Section {
-  return {
-    id,
-    heading,
-    headingPath: [heading],
-    level: 2,
-    paragraphs: [{ id: `p${id}`, sentences: sentenceIds.map((sentenceId) => ({
-        id: sentenceId,
-        text: sentenceId,
-        runs: [{ kind: "text", text: sentenceId }],
-      })) }],
   };
 }
 
@@ -43,7 +28,16 @@ const usedPolicy: Policy = {
   sensitivity: 50,
   shown: new Set(["p1.0"]),
   hidden: new Set(["p2.1"]),
-  decisions: [{ at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" }],
+  decisions: [
+    {
+      at: 0,
+      articleKey: articleKey("en", "Attack on Titan"),
+      articleTitle: "Attack on Titan",
+      show: ["p1.0"],
+      hide: ["p2.1"],
+      reason: "you have watched the first season",
+    },
+  ],
 };
 
 describe("readSessionStart", () => {
@@ -101,7 +95,13 @@ describe("readSessionStart", () => {
 describe("policyForOpened", () => {
   it("clears everything tied to the previous article's sentence ids", () => {
     const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
-    expect(next).toEqual(newPolicy(50));
+    expect(next.shown.size).toBe(0);
+    expect(next.hidden.size).toBe(0);
+  });
+
+  it("keeps the log of what the agent decided, which is a record of the session and not of one article", () => {
+    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
+    expect(next.decisions).toEqual(usedPolicy.decisions);
   });
 
   it("keeps the reader's sensitivity, which is not tied to any article", () => {
@@ -147,36 +147,8 @@ describe("scanned sections", () => {
   });
 });
 
-describe("what is open on the page", () => {
-  const open = article("en", "Attack on Titan", [
-    section("s0", "(lead)", ["p0.0", "p0.1"]),
-    section("s1", "Plot", ["p1.0", "p1.1", "p1.2"]),
-    section("s2", "Series finale", ["p2.0"]),
-  ]);
-
-  function showing(ids: string[]): Policy {
-    return { ...newPolicy(), shown: new Set(ids) };
-  }
-
-  it("groups what has been opened by the section it sits in", () => {
-    expect(revealedOnPage(open, showing(["p1.0", "p1.2"]))).toEqual([
-      { section: open.sections[1], ids: ["p1.0", "p1.2"] },
-    ]);
-  });
-
-  it("leaves out a sentence a decision closed again", () => {
-    expect(revealedOnPage(open, { ...showing(["p1.0"]), hidden: new Set(["p1.2"]) })).toEqual([
-      { section: open.sections[1], ids: ["p1.0"] },
-    ]);
-  });
-
-  it("reports nothing opened while no article is on screen", () => {
-    expect(revealedOnPage(null, showing(["p1.0"]))).toEqual([]);
-  });
-});
-
 describe("the record of what the agent has read", () => {
-  const open = article("en", "Attack on Titan", []);
+  const open = article("en", "Attack on Titan");
   const other = article("en", "The Sixth Sense");
 
   it("records a section once, however often it is read", () => {

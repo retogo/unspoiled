@@ -58,10 +58,30 @@ function fightClub(): Article {
   };
 }
 
+
+function anotherFilm(): Article {
+  return {
+    lang: "en",
+    title: "Another Film",
+    displayTitle: "Another Film",
+    sourceUrl: "https://en.wikipedia.org/wiki/Another_Film",
+    references: [],
+    sections: [
+      {
+        id: "s0",
+        heading: "(lead)",
+        headingPath: ["(lead)"],
+        level: 2,
+        paragraphs: [paragraph("p0", ["Another film opened the same summer."])],
+      },
+    ],
+  };
+}
+
 function harness(sensitivity?: number) {
   let policy: Policy = newPolicy(sensitivity);
   const read: string[] = [];
-  const article = fightClub();
+  let article = fightClub();
   const tools = buildTools({
     article: () => article,
     policy: () => policy,
@@ -89,6 +109,10 @@ function harness(sensitivity?: number) {
       (await call("open_article", input)) as unknown as Record<string, never>,
     policy: () => policy,
     read,
+    /** The reader moving on. The decision log does not reset with the article; the report does. */
+    reopen: (next: Article) => {
+      article = next;
+    },
   };
 }
 
@@ -345,6 +369,16 @@ describe("get_masking_report", () => {
       { show: ["p1.0", "p1.1"], hide: [], reason: "you have watched the first act" },
       { show: [], hide: ["p3.0"], reason: "you asked not to know the twist" },
     ]);
+  });
+
+  it("reports the decisions made on this article, and not those made on another", () => {
+    const { call, reopen } = harness();
+    call("apply_mask", { show: { paragraph_ids: ["p1"] }, reason: "you have watched the first act" });
+
+    reopen(anotherFilm());
+    call("apply_mask", { hide: { paragraph_ids: ["p0"] }, reason: "you have not seen this one at all" });
+
+    expect(call("get_masking_report").decisions).toMatchObject([{ reason: "you have not seen this one at all" }]);
   });
 
   it("returns no article text, so the report can be read out to the reader", () => {

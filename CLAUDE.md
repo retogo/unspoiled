@@ -30,18 +30,28 @@ at the root). The reader must work with no agent attached; the tools are an addi
 - Every call of `apply_mask` is recorded and shown, including one that matched nothing or changed
   nothing: it appears as "0 shown · 0 hidden" with its reason. A silent no-op is a decision the
   reader cannot disagree with.
-- Every decision reaches the screen, under exactly these names: the reason and the counts under
-  "Your agent's decisions", opened sentences under "Revealed on your page", and every section
-  `read_article_content` touched under "Your agent has read". Never filter silently, and do not
-  rename these panels.
+- "Agent activity" is the one complete record: every call, in the order it was made, with its
+  counts and the whole of its reason, for the length of the session. The notice that carries a
+  decision past the reader is a summary of one call and nothing is kept only there. A decision made
+  on another article keeps its place in that list and is named with the article it was made on;
+  `get_masking_report` reports only the decisions of the article open, whose ids still mean something.
+- Every decision reaches the screen, and where it goes is set by what the reader cannot afford to
+  miss. The sections `read_article_content` touched are named in front of the article, under
+  "Your agent has read:", for as long as that article is open, and there is nothing to dismiss them
+  with: reading cannot be undone. Each `apply_mask` says itself once as it lands, counts and reason,
+  in a notice that waits while the reader has it under the pointer and then goes; the standing
+  record of every decision and every tool call is folded away under the article in "Agent
+  activity". Never filter silently, and do not rename the warning or the drawer.
 - The reader outranks everyone: a tap lands in the same two sets, so it can take back what the
   agent decided. Only `apply_mask` writes to `decisions`.
 - Withheld text is never in the DOM. Render placeholders; never blur or hide real text with CSS.
 - Sentence, paragraph and section ids (`s3`, `p12`, `p12.4`) are positional and valid only for the
   article currently open. Reset article-scoped policy on article change; never trust ids from a URL.
-  Sensitivity belongs to the reader and survives the change.
+  Sensitivity belongs to the reader and survives the change, and so does the log in `decisions`:
+  those ids are never applied again, and the reader keeps the record of what was decided for them.
 - Sensitivity is the reader's control, and the safety net for a reader with no agent attached.
-  No tool sets it; `get_masking_report` reports it.
+  No tool sets it; `get_masking_report` reports it. It is the only thing the sidebar holds:
+  everything the page has to say about the agent is placed against the article instead.
 - Tool names say what they hand the agent (`read_article_content`, `apply_mask`). Never name
   anything "safe": the wording rules miss spoilers, and shown does not mean spoiler-free.
 - Tool descriptions are the only channel the page has to steer an agent. Each one names the call

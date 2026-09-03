@@ -1,5 +1,6 @@
 import { sectionHeading, sectionHeadingPath, type Article, type Paragraph, type Section } from "./segment";
-import { assessSection, hiddenSentence, maskWith, type Policy } from "./risk";
+import { assessSection, hiddenSentence, maskWith, type Decision, type Policy } from "./risk";
+import { articleKey } from "./session";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
@@ -125,6 +126,17 @@ function outline(article: Article, policy: Policy) {
   };
 }
 
+/**
+ * The decisions that shaped the article the reader has open. The log itself spans the session, but
+ * a report of this page would mislead by listing decisions whose ids belong to another article; the
+ * article each one was made on is dropped with them, since every row that is left names this one.
+ */
+function decisionsOn(policy: Policy, key: string): Omit<Decision, "articleKey" | "articleTitle">[] {
+  return policy.decisions
+    .filter((decision) => decision.articleKey === key)
+    .map(({ at, show, hide, reason }) => ({ at, show, hide, reason }));
+}
+
 function countSentences(article: Article, policy: Policy) {
   let total = 0;
   let hidden = 0;
@@ -240,7 +252,17 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
            cannot see is a decision they cannot disagree with. */
         const next: Policy = {
           ...masked,
-          decisions: [...policy.decisions, { at: Date.now(), show, hide, reason }],
+          decisions: [
+            ...policy.decisions,
+            {
+              at: Date.now(),
+              articleKey: articleKey(article.lang, article.title),
+              articleTitle: article.displayTitle,
+              show,
+              hide,
+              reason,
+            },
+          ],
         };
         context.setPolicy(next);
         return {
@@ -256,15 +278,16 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_masking_report",
       description:
-        "Audit what the reader is looking at: how many sentences are on their screen and how many are withheld, every decision apply_mask has made and the reason you gave for it, and which sections read_article_content has read. No article text, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
+        "Audit what the reader is looking at: how many sentences are on their screen and how many are withheld, every decision apply_mask has made on this article and the reason you gave for it, and which sections read_article_content has read. No article text, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
         const policy = context.policy();
+        const key = articleKey(article.lang, article.title);
         return {
           sensitivity: policy.sensitivity,
           sentences: countSentences(article, policy),
-          decisions: policy.decisions,
+          decisions: decisionsOn(policy, key),
           sections_read: context.scanned(),
         };
       },

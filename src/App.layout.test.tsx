@@ -59,47 +59,11 @@ afterEach(() => {
   Reflect.deleteProperty(document, "modelContext");
 });
 
-describe("the reader's controls on a narrow screen", () => {
-  it("comes before the article, so the article never buries it", async () => {
+describe("where the page puts each thing it has to say", () => {
+  it("keeps the reader's control before the article, so the article never buries it", async () => {
     await openArticle();
 
     expect(precedes(screen.getByRole("complementary"), screen.getByRole("article"))).toBe(true);
-  });
-
-  it("folds the ledgers and the tool log away, each summary saying how much it holds", async () => {
-    await openArticle();
-
-    const summaries = [
-      "Your agent's decisions · 0",
-      "Revealed on your page · 0",
-      "Your agent has read · 0",
-      "Tool activity · 0",
-    ];
-    for (const summary of summaries) {
-      const found = screen.getByText(summary);
-      expect(found.tagName).toBe("SUMMARY");
-      expect((found.parentElement as HTMLDetailsElement).open).toBe(false);
-    }
-  });
-
-  it("counts what each panel holds as the agent decides and reads", async () => {
-    const call = await openArticle();
-
-    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have seen the opening" });
-    await call("read_article_content", { section_ids: ["s1"] });
-
-    expect(screen.getByText("Your agent's decisions · 1")).toBeTruthy();
-    expect(screen.getByText("Revealed on your page · 1")).toBeTruthy();
-    expect(screen.getByText("Your agent has read · 1")).toBeTruthy();
-  });
-
-  it("counts the calls the agent has made", async () => {
-    const call = await openArticle();
-
-    await call("get_masking_report");
-    await call("get_masking_report");
-
-    expect(screen.getByText("Tool activity · 2")).toBeTruthy();
   });
 
   it("keeps one sensitivity control, pinned to the bottom rather than drawn a second time", async () => {
@@ -108,13 +72,28 @@ describe("the reader's controls on a narrow screen", () => {
     expect(screen.getAllByRole("slider")).toHaveLength(1);
   });
 
-  it("keeps the folded rows in the page, so nothing has to be opened to be read out", async () => {
+  it("leaves the reader's control alone in the sidebar", async () => {
     const call = await openArticle();
-
     await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have seen the opening" });
+    await call("read_article_content", { section_ids: ["s1"] });
 
-    expect(screen.getByRole("heading", { name: "Revealed on your page" }).parentElement?.textContent).toContain(
-      "Plot — 1 sentence",
-    );
+    const sidebar = screen.getByRole("complementary").textContent ?? "";
+
+    expect(sidebar).toContain("Sensitivity");
+    for (const audit of ["Revealed on your page", "Your agent's decisions", "Tool activity", "Agent activity"]) {
+      expect(sidebar).not.toContain(audit);
+    }
+  });
+
+  it("puts what the agent has read in front of the article and its workings after it", async () => {
+    const call = await openArticle();
+    await call("read_article_content", { section_ids: ["s1"] });
+
+    const article = screen.getByRole("article");
+    const drawer = screen.getByText(/^Agent activity ·/);
+
+    expect(precedes(screen.getByText(/^Your agent has read:/), article.querySelector("section") as Element)).toBe(true);
+    expect(precedes(article, drawer)).toBe(true);
+    expect(precedes(drawer, screen.getByRole("contentinfo"))).toBe(true);
   });
 });
