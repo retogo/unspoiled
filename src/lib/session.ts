@@ -1,4 +1,4 @@
-import { DEFAULT_SENSITIVITY, headingId, newPolicy, type Policy } from "./risk";
+import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
 import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
 
@@ -12,16 +12,14 @@ export type SessionStart = {
 };
 
 /**
- * One section a tool opened for the agent, and the ids of the sentences and headings whose text
- * that tool actually handed over. The ids are what lets the page state, in one place, exactly how
- * much of the article left it — the section alone would say a whole plot was read when one
- * sentence was.
+ * One section the agent has read in full. Reading is what the agent is for, so the page keeps the
+ * record rather than a measure of it: the reader is told which sections their agent knows, and can
+ * see that the list matches the sections it asked for.
  */
 export type ScannedSection = {
   articleKey: string;
   articleTitle: string;
   sectionId: string;
-  sent: string[];
 };
 
 /** A run of ids disclosed out of one section, ready to be labelled with that section's heading. */
@@ -102,24 +100,14 @@ export function scannedElsewhere(
   return [...elsewhere.values()];
 }
 
-export function recordScanned(
-  scanned: ScannedSection[],
-  article: Article,
-  sectionId: string,
-  sent: string[],
-): ScannedSection[] {
+export function recordScanned(scanned: ScannedSection[], article: Article, sectionId: string): ScannedSection[] {
   const key = articleKey(article.lang, article.title);
-  const read = scanned.find((entry) => entry.articleKey === key && entry.sectionId === sectionId);
-  if (!read) {
-    return [...scanned, { articleKey: key, articleTitle: article.displayTitle, sectionId, sent }];
-  }
-  const merged = new Set([...read.sent, ...sent]);
-  return scanned.map((entry) => (entry === read ? { ...entry, sent: [...merged] } : entry));
+  if (scanned.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)) return scanned;
+  return [...scanned, { articleKey: key, articleTitle: article.displayTitle, sectionId }];
 }
 
-/** Every id in a section that can be revealed or handed to the agent: its heading and its sentences. */
 function idsIn(section: Section): string[] {
-  return [headingId(section), ...section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((s) => s.id))];
+  return section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((sentence) => sentence.id));
 }
 
 function disclosedBySection(article: Article | null, disclosed: (id: string) => boolean): SectionDisclosure[] {
@@ -130,35 +118,10 @@ function disclosedBySection(article: Article | null, disclosed: (id: string) => 
   });
 }
 
-/** What the reader or their agent has opened in the article on screen, section by section. */
-export function revealedOnPage(article: Article | null, policy: Policy): SectionDisclosure[] {
-  return disclosedBySection(article, (id) => policy.revealed.has(id));
-}
-
-/** What a tool has handed to the agent out of the article on screen, section by section. */
-export function sentToAgent(scanned: ScannedSection[], article: Article | null): SectionDisclosure[] {
-  const key = article ? articleKey(article.lang, article.title) : null;
-  const sent = new Set(
-    scanned.filter((entry) => entry.articleKey === key).flatMap((entry) => entry.sent),
-  );
-  return disclosedBySection(article, (id) => sent.has(id));
-}
-
 /**
- * What the agent was handed out of articles the reader has since navigated away from. Only a count
- * survives: the ids are positional and mean nothing once another article is open.
+ * What a decision has opened in the article on screen, section by section. A sentence a later
+ * decision closed again is not open, whichever set it started in.
  */
-export function sentElsewhere(
-  scanned: ScannedSection[],
-  article: Article | null,
-): { articleTitle: string; sentences: number }[] {
-  const key = article ? articleKey(article.lang, article.title) : null;
-  const elsewhere = new Map<string, { articleTitle: string; sentences: number }>();
-  for (const entry of scanned) {
-    if (entry.articleKey === key) continue;
-    const group = elsewhere.get(entry.articleKey);
-    if (group) group.sentences += entry.sent.length;
-    else elsewhere.set(entry.articleKey, { articleTitle: entry.articleTitle, sentences: entry.sent.length });
-  }
-  return [...elsewhere.values()];
+export function revealedOnPage(article: Article | null, policy: Policy): SectionDisclosure[] {
+  return disclosedBySection(article, (id) => policy.shown.has(id) && !policy.hidden.has(id));
 }

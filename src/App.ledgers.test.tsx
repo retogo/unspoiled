@@ -24,7 +24,7 @@ const ARTICLES: Record<string, FetchedArticle> = {
     `<p>The film was released in 1999 and became a sleeper hit around the world.</p>
      <h2>Plot</h2>
      <p>A boy meets a doctor in a small town. The doctor listens to him for weeks on end.</p>
-     <h2>Ending: Kira loses</h2>
+     <h2>Reception</h2>
      <p>The detective writes his own name in the notebook and waits for the forty seconds to pass.</p>`,
   ),
   "Another Film": fetched(
@@ -96,57 +96,69 @@ afterEach(() => {
   Reflect.deleteProperty(document, "modelContext");
 });
 
-describe("the two disclosure ledgers", () => {
-  it("stands both of them up empty before anything is disclosed", async () => {
+describe("what the page shows the reader about its own filtering", () => {
+  it("stands every panel up empty before anything is decided or read", async () => {
     await readerWithAgent();
 
+    expect(ledger("Your agent's decisions")).toContain("Nothing yet");
     expect(ledger("Revealed on your page")).toContain("Nothing yet");
-    expect(ledger("Text sent to your agent")).toContain("Nothing yet");
+    expect(ledger("Your agent has read")).toContain("Nothing yet");
   });
 
-  it("lists a sentence the agent opened in both ledgers", async () => {
+  it("lists a sentence a decision opened under the section it sits in", async () => {
     const { call } = await readerWithAgent();
 
-    await call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
 
     expect(ledger("Revealed on your page")).toContain("Plot — 1 sentence");
-    expect(ledger("Text sent to your agent")).toContain("Plot — 1 sentence");
   });
 
-  it("sends nothing when the agent reveals a sentence that was already on screen", async () => {
+  it("states the reason the agent gave, beside how much that decision moved", async () => {
     const { call } = await readerWithAgent();
 
-    await call("reveal_withheld_sentences", { sentence_ids: ["p0.0"] });
+    await call("apply_mask", { show: { section_ids: ["s1"] }, reason: "you have watched the first act" });
 
-    expect(ledger("Text sent to your agent")).toContain("Nothing yet");
+    expect(ledger("Your agent's decisions")).toContain("you have watched the first act");
+    expect(ledger("Your agent's decisions")).toContain("2 shown · 0 hidden");
   });
 
-  it("counts a section read in full as sent without opening it on the page", async () => {
+  it("keeps the newest decision at the top", async () => {
     const { call } = await readerWithAgent();
 
-    await call("read_withheld_section", { section_id: "s1", acknowledge: true });
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+    await call("apply_mask", { hide: { sentence_ids: ["p0.0"] }, reason: "you asked not to know the year" });
 
-    expect(ledger("Text sent to your agent")).toContain("Plot — 2 sentences");
+    const rows = screen.getByRole("heading", { name: "Your agent's decisions" }).parentElement?.querySelectorAll("li");
+    expect(rows?.[0].textContent).toContain("you asked not to know the year");
+  });
+
+  it("takes a decision out of the ledger once it is closed again", async () => {
+    const { call } = await readerWithAgent();
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+
+    await call("apply_mask", { hide: { sentence_ids: ["p1.0"] }, reason: "you had not watched it after all" });
+
     expect(ledger("Revealed on your page")).toContain("Nothing yet");
     expect(screen.queryByText(/A boy meets a doctor/)).toBeNull();
   });
 
-  it("never names a withheld heading in either ledger", async () => {
+  it("names the section the agent read without opening it on the page", async () => {
     const { call } = await readerWithAgent();
 
-    await call("read_withheld_section", { section_id: "s2", acknowledge: true });
+    await call("read_article_content", { section_ids: ["s1"] });
 
-    expect(ledger("Text sent to your agent")).toContain("a section whose heading is withheld —");
-    expect(document.body.textContent).not.toContain("Kira");
+    expect(ledger("Your agent has read")).toContain("Plot");
+    expect(ledger("Revealed on your page")).toContain("Nothing yet");
+    expect(screen.queryByText(/A boy meets a doctor/)).toBeNull();
   });
 
-  it("keeps a count of the text sent from an article the reader has left", async () => {
+  it("keeps a count of the sections read in an article the reader has left", async () => {
     const { call, open } = await readerWithAgent();
-    await call("read_withheld_section", { section_id: "s1", acknowledge: true });
+    await call("read_article_content", { section_ids: ["s1"] });
 
     await open("Another Film");
 
-    expect(ledger("Text sent to your agent")).toContain("The Test Film — 2 sentences");
-    expect(ledger("Text sent to your agent")).not.toContain("Plot");
+    expect(ledger("Your agent has read")).toContain("The Test Film — 1 section");
+    expect(ledger("Your agent has read")).not.toContain("Plot");
   });
 });

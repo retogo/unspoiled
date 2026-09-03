@@ -124,7 +124,7 @@ describe("a sentence the reader has just opened", () => {
   it("arrives the same way when the agent opens it", async () => {
     const call = await openArticle();
 
-    await call("reveal_withheld_sentences", { sentence_ids: ["p2.0"] });
+    await call("apply_mask", { show: { sentence_ids: ["p2.0"] }, reason: "you have seen the film" });
 
     expect(flowing().map((piece) => piece.textContent).join("")).toBe(ENDING);
   });
@@ -169,16 +169,6 @@ describe("hiding an opened sentence again", () => {
 
     expect(document.body.textContent).not.toContain("shot by a former patient");
     expect(document.body.textContent).not.toContain("Cole Sear");
-  });
-
-  it("takes back a heading the reader opened", async () => {
-    await openArticle();
-    await userEvent.click(screen.getAllByRole("button", { name: "Heading withheld · reveal" })[0]);
-    expect(document.body.textContent).toContain("Ending explained");
-
-    await userEvent.click(screen.getByTitle("Hide this heading again"));
-
-    expect(document.body.textContent).not.toContain("Ending explained");
   });
 
   it("lets the sentence flow in again when the reader opens it a second time", async () => {
@@ -226,19 +216,6 @@ describe("hiding an opened sentence again", () => {
 
     expect(screen.getByRole("button", { name: "1 sentence withheld · reveal" })).toBeTruthy();
     expect(bands()[0]).toBe(standing);
-  });
-
-  it("leaves the sentences of a section alone when its heading is taken back", async () => {
-    await openArticle();
-    await revealParagraph(3);
-    await userEvent.click(screen.getAllByRole("button", { name: "Heading withheld · reveal" })[1]);
-    const sentence = openedSentences()[0];
-    const delays = delaysWithin(sentence);
-
-    await userEvent.click(screen.getByTitle("Hide this heading again"));
-
-    expect(openedSentences()).toEqual([sentence]);
-    expect(delaysWithin(sentence)).toEqual(delays);
   });
 
   it("is offered only for what the reader opened, not for what the slider shows", async () => {

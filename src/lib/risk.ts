@@ -69,18 +69,6 @@ export function assessSection(section: Section): Assessment {
   return { level: "safe", risk: NOTHING, reason: "checked sentence by sentence" };
 }
 
-export function assessHeading(section: Section): Assessment | null {
-  if (isLead(section)) return null;
-  if (STRONG_REVEAL_MARKERS.test(section.heading) || WEAK_REVEAL_MARKERS.test(section.heading)) {
-    return { level: "spoiler", risk: OUTRIGHT_REVEAL, reason: "the heading itself names the reveal" };
-  }
-  return null;
-}
-
-export function headingId(section: Section): string {
-  return `${section.id}.heading`;
-}
-
 function higher(base: Assessment, marker: Assessment): Assessment {
   return marker.risk > base.risk ? marker : base;
 }
@@ -146,68 +134,74 @@ export function assessSentences(section: Section): ReadonlyMap<string, Assessmen
   return assessments;
 }
 
+/**
+ * One call of `apply_mask`: what it opened, what it closed, and the reason the agent gave for
+ * doing so. The ids are the sentences the call actually reached, so the reader sees the size of a
+ * decision as well as its wording.
+ */
+export type Decision = {
+  at: number;
+  show: string[];
+  hide: string[];
+  reason: string;
+};
+
 export type Policy = {
   /** 0 withholds nothing; 100 withholds anything carrying the least suspicion. */
   sensitivity: number;
-  revealed: Set<string>;
-  withheld: Set<string>;
-  alreadyKnows: string[];
-  knownSections: Map<string, string>;
-  notes: string;
+  /** Sentences a decision opened, whatever the wording rules make of them. */
+  shown: Set<string>;
+  /** Sentences a decision closed. Hiding beats showing, and both beat the wording rules. */
+  hidden: Set<string>;
+  decisions: Decision[];
 };
 
 export const DEFAULT_SENSITIVITY = 75;
 
 export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY): Policy {
-  return {
-    sensitivity,
-    revealed: new Set(),
-    withheld: new Set(),
-    alreadyKnows: [],
-    knownSections: new Map(),
-    notes: "",
-  };
-}
-
-const WITHHELD_BY_AGENT: Assessment = {
-  level: "spoiler",
-  risk: CERTAIN,
-  reason: "withheld at your agent's request",
-};
-
-export function isSectionKnown(policy: Policy, sectionId: string): string | null {
-  return policy.knownSections.get(sectionId) ?? null;
-}
-
-function shownRegardless(policy: Policy, id: string, sectionId: string): boolean {
-  if (policy.revealed.has(id)) return true;
-  return isSectionKnown(policy, sectionId) !== null;
+  return { sensitivity, shown: new Set(), hidden: new Set(), decisions: [] };
 }
 
 /**
- * What the agent withheld scores a certainty, so it stays hidden at every sensitivity the reader
- * can pick except zero — where the threshold sits above everything and nothing is withheld at all.
+ * A sentence belongs to one side or the other, never both: naming it takes it out of the set it
+ * was in. That is what lets a decision be undone — by the agent's next call, or by the reader
+ * tapping the sentence — instead of accumulating into a state neither can reach past.
  */
-function withheldAt(assessment: Assessment | null, policy: Policy): Assessment | null {
+export function maskWith(policy: Policy, show: string[], hide: string[]): Policy {
+  const shown = new Set(policy.shown);
+  const hidden = new Set(policy.hidden);
+  for (const id of show) {
+    hidden.delete(id);
+    shown.add(id);
+  }
+  for (const id of hide) {
+    shown.delete(id);
+    hidden.add(id);
+  }
+  return { ...policy, shown, hidden };
+}
+
+const HIDDEN_BY_DECISION: Assessment = {
+  level: "spoiler",
+  risk: CERTAIN,
+  reason: "withheld by a decision on this page",
+};
+
+/**
+ * A decision outranks the wording rules in both directions, so an agent that has read the article
+ * can open what the rules over-withheld and close what they missed. The sensitivity slider is the
+ * page's own judgement, and it only decides the sentences no decision has reached.
+ */
+export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
+  if (policy.hidden.has(sentence.id)) return HIDDEN_BY_DECISION;
+  if (policy.shown.has(sentence.id)) return null;
+  const assessment = assessSentences(section).get(sentence.id);
   if (!assessment) return null;
   return assessment.risk > CERTAIN - policy.sensitivity ? assessment : null;
 }
 
-export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
-  if (shownRegardless(policy, sentence.id, section.id)) return null;
-  if (policy.withheld.has(sentence.id)) return withheldAt(WITHHELD_BY_AGENT, policy);
-  return withheldAt(assessSentences(section).get(sentence.id) ?? null, policy);
-}
-
 export function hiddenSentence(sentence: Sentence, section: Section, policy: Policy): boolean {
   return hiddenSentenceReason(sentence, section, policy) !== null;
-}
-
-export function hiddenHeading(section: Section, policy: Policy): Assessment | null {
-  const id = headingId(section);
-  if (shownRegardless(policy, id, section.id)) return null;
-  if (policy.withheld.has(id)) return withheldAt(WITHHELD_BY_AGENT, policy);
-  return withheldAt(assessHeading(section), policy);
 }
 
 export function countHidden(article: Article, policy: Policy): { hidden: number; total: number } {

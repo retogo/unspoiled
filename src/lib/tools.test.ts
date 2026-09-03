@@ -49,8 +49,8 @@ function fightClub(): Article {
       },
       {
         id: "s3",
-        heading: "Series finale",
-        headingPath: ["Series finale"],
+        heading: "Home media",
+        headingPath: ["Home media"],
         level: 2,
         paragraphs: [paragraph("p4", ["A cinema re-release followed in 2019."])],
       },
@@ -58,10 +58,9 @@ function fightClub(): Article {
   };
 }
 
-function harness() {
-  let policy: Policy = newPolicy();
-  const scanned: string[] = [];
-  const sent: string[] = [];
+function harness(sensitivity?: number) {
+  let policy: Policy = newPolicy(sensitivity);
+  const read: string[] = [];
   const article = fightClub();
   const tools = buildTools({
     article: () => article,
@@ -70,246 +69,248 @@ function harness() {
       policy = next;
     },
     openArticle: () => Promise.resolve({ status: "opened", article, policy }),
-    scanned: () => scanned,
-    sent: () => sent,
-    markScanned: (_article, sectionId, disclosed) => {
-      if (!scanned.includes(sectionId)) scanned.push(sectionId);
-      for (const id of disclosed) if (!sent.includes(id)) sent.push(id);
+    scanned: () => read,
+    markScanned: (_article, sectionIds) => {
+      for (const id of sectionIds) if (!read.includes(id)) read.push(id);
     },
   });
 
+  const call = (name: string, input: Record<string, unknown> = {}) => {
+    const tool = tools.find((candidate) => candidate.name === name);
+    if (!tool) throw new Error(`No such tool: ${name}`);
+    return tool.execute(input) as Record<string, never>;
+  };
+
   return {
-    call: (name: string, input: Record<string, unknown> = {}) => {
-      const tool = tools.find((candidate) => candidate.name === name);
-      if (!tool) throw new Error(`No such tool: ${name}`);
-      return tool.execute(input) as Record<string, never>;
-    },
+    tools,
+    call,
+    /** Opening an article is the one asynchronous tool, even when it only describes the open one. */
+    outline: async (input: Record<string, unknown> = {}) =>
+      (await call("open_article", input)) as unknown as Record<string, never>,
     policy: () => policy,
-    scanned,
-    sent,
+    read,
   };
 }
 
-function sectionOf(result: Record<string, never>, id: string) {
-  return (result.sections as unknown as { section_id: string }[]).find((section) => section.section_id === id) as Record<
-    string,
-    unknown
-  >;
+type OutlineSection = {
+  section_id: string;
+  heading: string;
+  heading_path: string[];
+  risk: string;
+  sentences: number;
+  withheld: number;
+  paragraph_ids: string[];
+};
+
+function sections(result: Record<string, never>): OutlineSection[] {
+  return result.sections as unknown as OutlineSection[];
 }
 
-describe("withheld headings", () => {
-  it("gives the agent the id it needs to reveal a withheld heading", () => {
-    const { call } = harness();
-    expect(sectionOf(call("get_article_outline"), "s3")).toMatchObject({
-      heading: null,
-      heading_id: "s3.heading",
-    });
+function sectionOf(result: Record<string, never>, id: string): OutlineSection {
+  const found = sections(result).find((section) => section.section_id === id);
+  if (!found) throw new Error(`No section ${id} in the outline`);
+  return found;
+}
+
+type ReadSentence = { sentence_id: string; text: string; shown: boolean };
+
+function sentencesOf(result: Record<string, never>, sectionId: string): ReadSentence[] {
+  const sections = result.sections as unknown as {
+    section_id: string;
+    paragraphs: { paragraph_id: string; sentences: ReadSentence[] }[];
+  }[];
+  const found = sections.find((section) => section.section_id === sectionId);
+  if (!found) throw new Error(`No section ${sectionId} in the content`);
+  return found.paragraphs.flatMap((entry) => entry.sentences);
+}
+
+describe("the tools the page offers", () => {
+  it("offers four, named for what each one does to the page", () => {
+    expect(harness().tools.map((tool) => tool.name)).toEqual([
+      "open_article",
+      "read_article_content",
+      "apply_mask",
+      "get_masking_report",
+    ]);
   });
 
-  it("names the heading id in describe_withheld_content too", () => {
-    const { call } = harness();
-    expect(call("describe_withheld_content", { section_id: "s3" })).toMatchObject({
-      heading: null,
-      heading_id: "s3.heading",
-    });
-  });
-
-  it("does not offer a heading id for a heading that is on screen", () => {
-    const { call } = harness();
-    expect(sectionOf(call("get_article_outline"), "s2").heading_id).toBeUndefined();
-  });
-
-  it("withholds the heading when the agent withholds the section", () => {
-    const { call } = harness();
-    call("withhold_article_content", { section_ids: ["s2"], because: "the reader has not seen the film" });
-    expect(sectionOf(call("get_article_outline"), "s2")).toMatchObject({
-      heading: null,
-      heading_id: "s2.heading",
-    });
-  });
-
-  it("withholds a heading the agent names by id", () => {
-    const { call } = harness();
-    call("withhold_article_content", { sentence_ids: ["s0.heading"], because: "the title gives it away" });
-    expect(sectionOf(call("get_article_outline"), "s0").heading).toBeNull();
-  });
-
-  it("puts a withheld heading back on screen when revealed", () => {
-    const { call } = harness();
-    expect(call("reveal_withheld_sentences", { sentence_ids: ["s3.heading"] })).toMatchObject({
-      revealed: [{ sentence_id: "s3.heading", text: "Series finale" }],
-    });
-    expect(sectionOf(call("get_article_outline"), "s3").heading).toBe("Series finale");
-  });
-
-  it("never states a withheld heading in a reason", () => {
-    const { call } = harness();
-    const described = call("describe_withheld_content", { section_id: "s3" });
-    expect(JSON.stringify(described)).not.toContain("finale");
+  it("tells the agent which call comes next in every description", () => {
+    for (const tool of harness().tools) {
+      expect(tool.description).toMatch(/open_article|read_article_content|apply_mask|get_masking_report/);
+    }
   });
 });
 
-describe("what mark_sections_known claims to unhide", () => {
-  it("really unhides sentences the agent had withheld", () => {
-    const { call } = harness();
-    call("withhold_article_content", { section_ids: ["s1"], because: "the reader has not seen the film" });
-    call("mark_sections_known", { section_ids: ["s1"], because: "you read the novel" });
-    const text = call("get_visible_section_text", { section_id: "s1" });
-    expect(JSON.stringify(text)).toContain("The narrator attends support groups.");
+describe("open_article", () => {
+  it("describes each section without withholding its heading", async () => {
+    expect(sectionOf(await harness().outline(), "s1")).toEqual({
+      section_id: "s1",
+      heading: "Plot",
+      heading_path: ["Plot"],
+      risk: "spoiler",
+      sentences: 3,
+      withheld: 3,
+      paragraph_ids: ["p1", "p2"],
+    });
+  });
+
+  it("counts what the reader is currently being shown, not what the rules would withhold", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", { show: { section_ids: ["s1"] }, reason: "you have watched it all" });
+    expect(sectionOf(await describe(), "s1").withheld).toBe(0);
+  });
+
+  it("reports the article a bare call is describing", async () => {
+    const result = await harness().outline();
+    expect(result.title).toBe("Fight Club (film)");
+    expect(result.lang).toBe("en");
+    expect(result.source_url).toBe("https://en.wikipedia.org/wiki/Fight_Club_(film)");
   });
 });
 
-describe("the middle of the scale withholds the reveal in a reception section", () => {
-  it("hides the twist sentence but keeps the box office", () => {
+describe("read_article_content", () => {
+  it("hands over a withheld section in full, saying which of it the reader can see", () => {
+    const sentences = sentencesOf(harness().call("read_article_content", { section_ids: ["s1"] }), "s1");
+    expect(sentences).toEqual([
+      { sentence_id: "p1.0", text: "The narrator attends support groups.", shown: false },
+      { sentence_id: "p1.1", text: "He meets a soap salesman on a flight.", shown: false },
+      { sentence_id: "p2.0", text: "They start a club in the basement of a bar.", shown: false },
+    ]);
+  });
+
+  it("keeps the paragraphs apart, under the ids apply_mask takes", () => {
+    const result = harness().call("read_article_content", { section_ids: ["s1"] });
+    const paragraphs = (result.sections as unknown as { paragraphs: { paragraph_id: string }[] }[])[0].paragraphs;
+    expect(paragraphs.map((entry) => entry.paragraph_id)).toEqual(["p1", "p2"]);
+  });
+
+  it("says a sentence is shown once a decision has opened it", () => {
     const { call } = harness();
-    call("set_spoiler_policy", { sensitivity: 50 });
-    const text = JSON.stringify(call("get_visible_section_text", { section_id: "s2" }));
-    expect(text).not.toContain("Tyler are one man");
-    expect(text).toContain("101 million dollars");
+    call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have seen the first act" });
+    expect(sentencesOf(call("read_article_content", { section_ids: ["s1"] }), "s1")[0].shown).toBe(true);
+  });
+
+  it("reads the whole article when no section is named", () => {
+    const result = harness().call("read_article_content");
+    expect(sections(result).map((section) => section.section_id)).toEqual(["s0", "s1", "s2", "s3"]);
+  });
+
+  it("lists what it read where the reader can see it", () => {
+    const { call, read } = harness();
+    call("read_article_content", { section_ids: ["s1", "s2"] });
+    expect(read).toEqual(["s1", "s2"]);
+    expect(call("get_masking_report").sections_read).toEqual(["s1", "s2"]);
+  });
+
+  it("refuses a section id the article does not have", () => {
+    expect(() => harness().call("read_article_content", { section_ids: ["s9"] })).toThrow(/s9/);
   });
 });
 
-describe("set_spoiler_policy", () => {
-  it("applies the sensitivity the agent asked for", () => {
-    const { call, policy } = harness();
-    expect(call("set_spoiler_policy", { sensitivity: 20 })).toMatchObject({ applied: 20 });
-    expect(policy().sensitivity).toBe(20);
-  });
-
-  it("reports the sensitivity back through the outline", () => {
+describe("apply_mask", () => {
+  it("withholds a sentence the wording rules found nothing wrong with", () => {
     const { call } = harness();
-    call("set_spoiler_policy", { sensitivity: 40 });
-    expect(call("get_article_outline").sensitivity).toBe(40);
+    call("apply_mask", { hide: { sentence_ids: ["p4.0"] }, reason: "it names the actor you asked about" });
+    expect(sentencesOf(call("read_article_content", { section_ids: ["s3"] }), "s3")[0].shown).toBe(false);
   });
 
-  it.each([-1, 101, 62.5, "50", null, undefined])("refuses %s, which is not a point on the scale", (sensitivity) => {
+  it("keeps withholding it at the sensitivity that withholds nothing else", async () => {
+    const { call, outline: describe } = harness(0);
+    call("apply_mask", { hide: { sentence_ids: ["p4.0"] }, reason: "it names the actor you asked about" });
+    expect(sectionOf(await describe(), "s3").withheld).toBe(1);
+  });
+
+  it("opens a sentence the wording rules withheld", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "it is the opening scene" });
+    expect(sectionOf(await describe(), "s1").withheld).toBe(2);
+  });
+
+  it("spreads a section over the sentences in it", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", { show: { section_ids: ["s1"] }, reason: "you have read the novel" });
+    expect(sectionOf(await describe(), "s1").withheld).toBe(0);
+  });
+
+  it("spreads a paragraph over the sentences in it", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", { show: { paragraph_ids: ["p1"] }, reason: "you have watched the first act" });
+    expect(sectionOf(await describe(), "s1").withheld).toBe(1);
+  });
+
+  it("withholds a sentence named on both sides of one call", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", {
+      show: { section_ids: ["s1"] },
+      hide: { sentence_ids: ["p2.0"] },
+      reason: "you have watched up to the bar",
+    });
+    expect(sectionOf(await describe(), "s1").withheld).toBe(1);
+  });
+
+  it("lets a later call take back what an earlier one decided", async () => {
+    const { call, outline: describe } = harness();
+    call("apply_mask", { hide: { sentence_ids: ["p4.0"] }, reason: "you asked not to know" });
+    call("apply_mask", { show: { sentence_ids: ["p4.0"] }, reason: "you have changed your mind" });
+    expect(sectionOf(await describe(), "s3").withheld).toBe(0);
+  });
+
+  it("refuses a call that gives no reason", () => {
     const { call, policy } = harness();
-    expect(() => call("set_spoiler_policy", { sensitivity })).toThrow(/0 to 100/);
-    expect(policy().sensitivity).toBe(newPolicy().sensitivity);
+    expect(() => call("apply_mask", { hide: { sentence_ids: ["p4.0"] } })).toThrow(/reason/);
+    expect(policy().hidden.size).toBe(0);
   });
 
-  it("accepts both ends of the scale", () => {
-    const { call, policy } = harness();
-    call("set_spoiler_policy", { sensitivity: 0 });
-    expect(policy().sensitivity).toBe(0);
-    call("set_spoiler_policy", { sensitivity: 100 });
-    expect(policy().sensitivity).toBe(100);
+  it("refuses a reason that is only spaces", () => {
+    expect(() => harness().call("apply_mask", { hide: { sentence_ids: ["p4.0"] }, reason: "   " })).toThrow(/reason/);
   });
 
-  it("keeps what the reader already knows when only the sensitivity moves", () => {
-    const { call, policy } = harness();
-    call("set_spoiler_policy", { sensitivity: 50, already_knows: ["read the original manga"] });
-    call("set_spoiler_policy", { sensitivity: 20 });
-    expect(policy().alreadyKnows).toEqual(["read the original manga"]);
-  });
-});
-
-describe("describe_withheld_content", () => {
-  it("scores each withheld sentence so the agent can say how far to lower the slider", () => {
-    const { call } = harness();
-    const hidden = call("describe_withheld_content", { section_id: "s1" }).hidden as unknown as {
-      sentence_id: string;
-      risk: number;
-    }[];
-    expect(hidden.map((item) => item.risk)).toEqual([60, 80, 100]);
+  it("refuses an id the article does not have, rather than silently masking nothing", () => {
+    expect(() => harness().call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "a typo" })).toThrow(/p9.9/);
   });
 
-  it("stops describing a sentence once the reader has lowered the slider past it", () => {
-    const { call } = harness();
-    call("set_spoiler_policy", { sensitivity: 35 });
-    const hidden = call("describe_withheld_content", { section_id: "s1" }).hidden as unknown as { risk: number }[];
-    expect(hidden.map((item) => item.risk)).toEqual([80, 100]);
+  it("reports what it reached, so the agent can check its own decision", () => {
+    const result = harness().call("apply_mask", {
+      show: { paragraph_ids: ["p1"] },
+      hide: { sentence_ids: ["p3.0"] },
+      reason: "you have watched the first act",
+    });
+    expect(result).toMatchObject({
+      show: ["p1.0", "p1.1"],
+      hide: ["p3.0"],
+      reason: "you have watched the first act",
+    });
   });
 });
 
 describe("get_masking_report", () => {
-  it("states the policy in a shape the agent can read back", () => {
+  it("counts every sentence of the article as shown or withheld", () => {
+    expect(harness().call("get_masking_report").sentences).toEqual({ total: 7, shown: 3, hidden: 4 });
+  });
+
+  it("states the sensitivity the reader's slider is on", () => {
+    expect(harness(50).call("get_masking_report").sensitivity).toBe(50);
+  });
+
+  it("keeps every decision and the reason given for it", () => {
     const { call } = harness();
-    call("set_spoiler_policy", { sensitivity: 50 });
-    call("withhold_article_content", { sentence_ids: ["p0.0"], because: "the reader asked" });
-    call("mark_sections_known", { section_ids: ["s2"], because: "you have seen it" });
-    expect(call("get_masking_report").policy).toEqual({
-      sensitivity: 50,
-      revealed: [],
-      withheld: ["p0.0"],
-      already_knows: [],
-      known_sections: [{ section_id: "s2", because: "you have seen it" }],
-      notes: "the reader asked",
-    });
-  });
-});
-
-describe("reveal is a disclosure the reader can see", () => {
-  it("lists the section on screen once the agent reads withheld text", () => {
-    const { call, scanned } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["p1.0", "p1.1"] });
-    expect(scanned).toEqual(["s1"]);
-    expect(call("get_masking_report").sections_the_agent_has_read).toEqual(["s1"]);
+    call("apply_mask", { show: { paragraph_ids: ["p1"] }, reason: "you have watched the first act" });
+    call("apply_mask", { hide: { sentence_ids: ["p3.0"] }, reason: "you asked not to know the twist" });
+    const decisions = call("get_masking_report").decisions as unknown as {
+      show: string[];
+      hide: string[];
+      reason: string;
+    }[];
+    expect(decisions.map(({ show, hide, reason }) => ({ show, hide, reason }))).toEqual([
+      { show: ["p1.0", "p1.1"], hide: [], reason: "you have watched the first act" },
+      { show: [], hide: ["p3.0"], reason: "you asked not to know the twist" },
+    ]);
   });
 
-  it("stays quiet when the sentences were already on screen", () => {
-    const { call, scanned } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["p0.0"] });
-    expect(scanned).toEqual([]);
-  });
-
-  it("lists the section when the agent reveals a withheld heading", () => {
-    const { call, scanned } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["s3.heading"] });
-    expect(scanned).toEqual(["s3"]);
-  });
-});
-
-describe("the ledger of text that reached the agent", () => {
-  it("records the sentences a reveal took out of the mask", () => {
-    const { call, sent } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["p1.0", "p1.1"] });
-    expect(sent).toEqual(["p1.0", "p1.1"]);
-  });
-
-  it("records nothing for a sentence that was already on screen", () => {
-    const { call, sent } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["p0.0"] });
-    expect(sent).toEqual([]);
-  });
-
-  it("records a withheld heading the agent revealed", () => {
-    const { call, sent } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["s3.heading"] });
-    expect(sent).toEqual(["s3.heading"]);
-  });
-
-  it("records every sentence of a section read in full", () => {
-    const { call, sent } = harness();
-    call("read_withheld_section", { section_id: "s1", acknowledge: true });
-    expect(sent).toEqual(["p1.0", "p1.1", "p2.0"]);
-  });
-
-  it("records the heading of a section read in full when the page was withholding it", () => {
-    const { call, sent } = harness();
-    call("read_withheld_section", { section_id: "s3", acknowledge: true });
-    expect(sent).toEqual(["s3.heading", "p4.0"]);
-  });
-
-  it("records nothing when read_withheld_section refuses", () => {
-    const { call, sent, scanned } = harness();
-    call("read_withheld_section", { section_id: "s1", acknowledge: false });
-    expect(sent).toEqual([]);
-    expect(scanned).toEqual([]);
-  });
-
-  it("reports what is open on the page apart from what was sent", () => {
+  it("returns no article text, so the report can be read out to the reader", () => {
     const { call } = harness();
-    call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
-    call("read_withheld_section", { section_id: "s2", acknowledge: true });
-    const report = call("get_masking_report");
-    expect(report.revealed_on_page).toEqual(["p1.0"]);
-    expect(report.text_sent_to_agent).toEqual(["p1.0", "p3.0", "p3.1"]);
-  });
-
-  it("names no withheld heading in either ledger", () => {
-    const { call } = harness();
-    call("read_withheld_section", { section_id: "s3", acknowledge: true });
-    expect(JSON.stringify(call("get_masking_report"))).not.toContain("finale");
+    call("read_article_content");
+    call("apply_mask", { hide: { sentence_ids: ["p3.0"] }, reason: "you asked not to know the twist" });
+    expect(JSON.stringify(call("get_masking_report"))).not.toContain("Tyler");
   });
 });

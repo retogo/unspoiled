@@ -10,8 +10,6 @@ import {
   revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
-  sentElsewhere,
-  sentToAgent,
 } from "./session";
 
 function article(lang: Lang, title: string, sections: Section[] = []): Article {
@@ -41,11 +39,9 @@ function section(id: string, heading: string, sentenceIds: string[]): Section {
 
 const usedPolicy: Policy = {
   sensitivity: 50,
-  revealed: new Set(["p1.0"]),
-  withheld: new Set(["p2.1"]),
-  alreadyKnows: ["finished season 1"],
-  knownSections: new Map([["s2", "finished season 1"]]),
-  notes: "wants to know nothing about the ending",
+  shown: new Set(["p1.0"]),
+  hidden: new Set(["p2.1"]),
+  decisions: [{ at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" }],
 };
 
 describe("readSessionStart", () => {
@@ -118,19 +114,19 @@ describe("policyForOpened", () => {
 
   it("treats the same title in another language as another article", () => {
     const next = policyForOpened(usedPolicy, article("en", "The Sixth Sense"), article("ja", "The Sixth Sense"));
-    expect(next.revealed.size).toBe(0);
+    expect(next.shown.size).toBe(0);
   });
 
   it("clears the previous article's state when the first article is opened", () => {
-    expect(policyForOpened(usedPolicy, null, article("en", "The Sixth Sense")).withheld.size).toBe(0);
+    expect(policyForOpened(usedPolicy, null, article("en", "The Sixth Sense")).hidden.size).toBe(0);
   });
 });
 
 describe("scanned sections", () => {
   const scanned = [
-    { articleKey: articleKey("en", "Attack on Titan"), articleTitle: "Attack on Titan", sectionId: "s2", sent: ["p2.0"] },
-    { articleKey: articleKey("en", "The Sixth Sense"), articleTitle: "The Sixth Sense", sectionId: "s1", sent: ["p1.0"] },
-    { articleKey: articleKey("ja", "シックス・センス"), articleTitle: "シックス・センス", sectionId: "s1", sent: ["p1.0"] },
+    { articleKey: articleKey("en", "Attack on Titan"), articleTitle: "Attack on Titan", sectionId: "s2" },
+    { articleKey: articleKey("en", "The Sixth Sense"), articleTitle: "The Sixth Sense", sectionId: "s1" },
+    { articleKey: articleKey("ja", "シックス・センス"), articleTitle: "シックス・センス", sectionId: "s1" },
   ];
 
   it("reports only the sections read in the article that is open", () => {
@@ -149,58 +145,47 @@ describe("scanned sections", () => {
   });
 });
 
-describe("the disclosure ledgers", () => {
+describe("what is open on the page", () => {
   const open = article("en", "Attack on Titan", [
     section("s0", "(lead)", ["p0.0", "p0.1"]),
     section("s1", "Plot", ["p1.0", "p1.1", "p1.2"]),
     section("s2", "Series finale", ["p2.0"]),
   ]);
-  const other = article("en", "The Sixth Sense");
 
-  function revealing(ids: string[]): Policy {
-    return { ...newPolicy(), revealed: new Set(ids) };
+  function showing(ids: string[]): Policy {
+    return { ...newPolicy(), shown: new Set(ids) };
   }
 
   it("groups what has been opened by the section it sits in", () => {
-    expect(revealedOnPage(open, revealing(["p1.0", "p1.2"]))).toEqual([
+    expect(revealedOnPage(open, showing(["p1.0", "p1.2"]))).toEqual([
       { section: open.sections[1], ids: ["p1.0", "p1.2"] },
     ]);
   });
 
-  it("counts a revealed heading alongside the sentences under it", () => {
-    expect(revealedOnPage(open, revealing(["s2.heading", "p2.0"]))).toEqual([
-      { section: open.sections[2], ids: ["s2.heading", "p2.0"] },
+  it("leaves out a sentence a decision closed again", () => {
+    expect(revealedOnPage(open, { ...showing(["p1.0"]), hidden: new Set(["p1.2"]) })).toEqual([
+      { section: open.sections[1], ids: ["p1.0"] },
     ]);
   });
 
   it("reports nothing opened while no article is on screen", () => {
-    expect(revealedOnPage(null, revealing(["p1.0"]))).toEqual([]);
+    expect(revealedOnPage(null, showing(["p1.0"]))).toEqual([]);
   });
+});
 
-  it("counts only the text sent from the article that is open", () => {
-    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0", "p1.1"]), other, "s4", ["p9.0"]);
-    expect(sentToAgent(scanned, open)).toEqual([{ section: open.sections[1], ids: ["p1.0", "p1.1"] }]);
-  });
+describe("the record of what the agent has read", () => {
+  const open = article("en", "Attack on Titan", []);
+  const other = article("en", "The Sixth Sense");
 
-  it("summarises the text sent from other articles without naming their sections", () => {
-    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0", "p1.1"]), other, "s4", ["p9.0"]);
-    expect(sentElsewhere(scanned, open)).toEqual([{ articleTitle: "The Sixth Sense", sentences: 1 }]);
-  });
-
-  it("merges a second disclosure into the record of a section already read", () => {
-    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0"]), open, "s1", ["p1.0", "p1.1"]);
+  it("records a section once, however often it is read", () => {
+    const scanned = recordScanned(recordScanned([], open, "s1"), open, "s1");
     expect(scanned).toEqual([
-      {
-        articleKey: articleKey("en", "Attack on Titan"),
-        articleTitle: "Attack on Titan",
-        sectionId: "s1",
-        sent: ["p1.0", "p1.1"],
-      },
+      { articleKey: articleKey("en", "Attack on Titan"), articleTitle: "Attack on Titan", sectionId: "s1" },
     ]);
   });
 
   it("keeps the record of a section read in another article", () => {
-    const scanned = recordScanned(recordScanned([], other, "s4", ["p9.0"]), open, "s1", ["p1.0"]);
+    const scanned = recordScanned(recordScanned([], other, "s4"), open, "s1");
     expect(scannedForArticle(scanned, other)).toEqual(["s4"]);
     expect(scannedElsewhere(scanned, other)).toEqual([{ articleTitle: "Attack on Titan", sections: 1 }]);
   });

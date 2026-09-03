@@ -69,20 +69,28 @@ describe("the reader's controls on a narrow screen", () => {
   it("folds the ledgers and the tool log away, each summary saying how much it holds", async () => {
     await openArticle();
 
-    for (const summary of ["Revealed on your page · 0", "Text sent to your agent · 0", "Tool activity · 0"]) {
+    const summaries = [
+      "Your agent's decisions · 0",
+      "Revealed on your page · 0",
+      "Your agent has read · 0",
+      "Tool activity · 0",
+    ];
+    for (const summary of summaries) {
       const found = screen.getByText(summary);
       expect(found.tagName).toBe("SUMMARY");
       expect((found.parentElement as HTMLDetailsElement).open).toBe(false);
     }
   });
 
-  it("counts the sentences each ledger holds as the agent discloses them", async () => {
+  it("counts what each panel holds as the agent decides and reads", async () => {
     const call = await openArticle();
 
-    await call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have seen the opening" });
+    await call("read_article_content", { section_ids: ["s1"] });
 
+    expect(screen.getByText("Your agent's decisions · 1")).toBeTruthy();
     expect(screen.getByText("Revealed on your page · 1")).toBeTruthy();
-    expect(screen.getByText("Text sent to your agent · 1")).toBeTruthy();
+    expect(screen.getByText("Your agent has read · 1")).toBeTruthy();
   });
 
   it("counts the calls the agent has made", async () => {
@@ -103,7 +111,7 @@ describe("the reader's controls on a narrow screen", () => {
   it("keeps the folded rows in the page, so nothing has to be opened to be read out", async () => {
     const call = await openArticle();
 
-    await call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have seen the opening" });
 
     expect(screen.getByRole("heading", { name: "Revealed on your page" }).parentElement?.textContent).toContain(
       "Plot — 1 sentence",

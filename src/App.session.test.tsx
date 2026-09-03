@@ -84,8 +84,8 @@ async function callTool(registered: WebMcpTool[], name: string, input: Record<st
   return result;
 }
 
-async function openArticle(registered: WebMcpTool[], language: Lang, title: string) {
-  const result = await callTool(registered, "open_article", { title, language });
+async function openArticle(registered: WebMcpTool[], lang: Lang, title: string) {
+  const result = await callTool(registered, "open_article", { title, lang });
   await waitFor(() => screen.getByRole("heading", { level: 2, name: title }));
   return result;
 }
@@ -163,29 +163,29 @@ afterEach(() => {
 });
 
 describe("opening another article", () => {
-  it("does not carry the sections the reader knew over to the new article", async () => {
+  it("does not carry a decision about one article over to the next", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "mark_sections_known", {
-      section_ids: ["s2"],
-      because: "finished season 1",
+    await callTool(registered, "apply_mask", {
+      show: { section_ids: ["s2"] },
+      reason: "you have finished season 1",
     });
-    expect(screen.getByText("shown — finished season 1")).toBeTruthy();
+    expect(articleText()).toContain("Eren Yeager lives in a walled town");
 
     await openArticle(registered, "en", "The Sixth Sense");
 
-    expect(screen.queryByText("shown — finished season 1")).toBeNull();
     expect(screen.queryByText(/Malcolm Crowe has been a ghost/)).toBeNull();
+    expect(screen.queryByText("you have finished season 1")).toBeNull();
   });
 
-  it("does not let sentences withheld in one article hide sentences in the next", async () => {
+  it("does not let sentences hidden in one article hide sentences in the next", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "withhold_article_content", {
-      sentence_ids: ["p1.0"],
-      because: "the reader does not want production details",
+    await callTool(registered, "apply_mask", {
+      hide: { sentence_ids: ["p1.0"] },
+      reason: "you do not want production details",
     });
     expect(screen.queryByText(/Isayama pitched the series/)).toBeNull();
 
@@ -194,38 +194,25 @@ describe("opening another article", () => {
     expect(screen.getByText(/Shyamalan sold the screenplay/)).toBeTruthy();
   });
 
-  it("forgets what the agent said the reader already knows", async () => {
-    const registered = await renderWithAgent();
-
-    await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "set_spoiler_policy", {
-      sensitivity: 75,
-      already_knows: ["read the original manga"],
-    });
-    expect(screen.getByText("read the original manga")).toBeTruthy();
-
-    await openArticle(registered, "en", "The Sixth Sense");
-
-    expect(screen.queryByText("read the original manga")).toBeNull();
-  });
-
   it("keeps the reader's sensitivity, which belongs to the reader and not the article", async () => {
     const registered = await renderWithAgent();
-
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "set_spoiler_policy", { sensitivity: 50 });
 
+    await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
     await openArticle(registered, "en", "The Sixth Sense");
 
-    const outline = await callTool(registered, "get_article_outline");
-    expect(outline.sensitivity).toBe(50);
+    const report = await callTool(registered, "get_masking_report");
+    expect(report.sensitivity).toBe(50);
   });
 
   it("keeps what the reader has opened when the same article is opened again", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "reveal_withheld_sentences", { sentence_ids: ["p2.0"] });
+    await callTool(registered, "apply_mask", {
+      show: { sentence_ids: ["p2.0"] },
+      reason: "you have watched the first episode",
+    });
     expect(articleText()).toContain("Eren Yeager lives in a walled town");
 
     await openArticle(registered, "en", "Attack on Titan");
@@ -242,8 +229,16 @@ describe("what the tools see of the page", () => {
     await userEvent.click(screen.getByRole("button", { name: /^Reveal .* chars$/ }));
 
     const report = await callTool(registered, "get_masking_report");
-    expect((report.policy as { revealed: string[] }).revealed).toEqual(["p2.0"]);
-    expect(report.revealed_on_page).toEqual(["p2.0"]);
+    expect(report.sentences).toEqual({ total: 3, shown: 3, hidden: 0 });
+  });
+
+  it("counts what the reader does to their own page as theirs, not as a decision of the agent's", async () => {
+    const registered = await renderWithAgent();
+    await openArticle(registered, "en", "Attack on Titan");
+
+    await userEvent.click(screen.getByRole("button", { name: /^Reveal .* chars$/ }));
+
+    expect((await callTool(registered, "get_masking_report")).decisions).toEqual([]);
   });
 });
 
@@ -301,10 +296,10 @@ describe("exposing the tools to an agent", () => {
 
   it("shows the reader which calls failed", async () => {
     const registered = await renderWithAgent();
-    await callTool(registered, "get_article_outline");
+    await callTool(registered, "open_article");
 
     const panel = screen.getByRole("heading", { name: "Tool activity" }).parentElement;
-    expect(panel?.textContent).toContain("get_article_outline");
+    expect(panel?.textContent).toContain("open_article");
     expect(panel?.textContent).toContain("error");
   });
 
@@ -324,7 +319,7 @@ describe("open_article", () => {
     const result = await callTool(registered, "open_article", { title: "Attack on Titan" });
 
     expect(result.title).toBe("Attack on Titan");
-    expect(result.language).toBe("en");
+    expect(result.lang).toBe("en");
     expect(result.sections).toHaveLength(3);
     expect(screen.getByRole("heading", { level: 2, name: "Attack on Titan" })).toBeTruthy();
   });
@@ -344,20 +339,26 @@ describe("open_article", () => {
     await callTool(registered, "open_article", { title: "Attack on Titan" });
     await callTool(registered, "open_article", { title: "The Sixth Sense" });
 
-    const outline = await callTool(registered, "get_article_outline");
+    const outline = await callTool(registered, "open_article");
     expect(outline.title).toBe("The Sixth Sense");
+  });
+
+  it("refuses a bare call while no article is open", async () => {
+    const registered = await renderWithAgent();
+
+    expect(String((await callTool(registered, "open_article")).error)).toContain("No article is open");
   });
 
   it("describes the new article under the policy that now applies to it", async () => {
     const registered = await renderWithAgent();
 
     await callTool(registered, "open_article", { title: "Attack on Titan" });
-    await callTool(registered, "mark_sections_known", { section_ids: ["s2"], because: "finished season 1" });
+    await callTool(registered, "apply_mask", { show: { section_ids: ["s2"] }, reason: "finished season 1" });
 
     const result = await callTool(registered, "open_article", { title: "The Sixth Sense" });
 
-    const sections = result.sections as { section_id: string; risk: string }[];
-    expect(sections.find((section) => section.section_id === "s2")?.risk).toBe("spoiler");
+    const sections = result.sections as { section_id: string; withheld: number }[];
+    expect(sections.find((section) => section.section_id === "s2")?.withheld).toBe(1);
   });
 
   it("lets the last request win when an earlier fetch finishes after it", async () => {
@@ -391,52 +392,60 @@ describe("the record of what the agent has read", () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_article_content", { section_ids: ["s2"] });
     expect(screen.getByText(/It knows those spoilers/)).toBeTruthy();
 
     await openArticle(registered, "en", "Attack on Titan");
 
     expect(screen.getByText(/It knows those spoilers/)).toBeTruthy();
     const report = await callTool(registered, "get_masking_report");
-    expect(report.sections_the_agent_has_read).toEqual(["s2"]);
+    expect(report.sections_read).toEqual(["s2"]);
   });
 
   it("comes back when the reader returns to the article", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_article_content", { section_ids: ["s2"] });
 
     await openArticle(registered, "en", "The Sixth Sense");
     await openArticle(registered, "en", "Attack on Titan");
 
     const report = await callTool(registered, "get_masking_report");
-    expect(report.sections_the_agent_has_read).toEqual(["s2"]);
+    expect(report.sections_read).toEqual(["s2"]);
   });
 
   it("does not report another article's sections as read in this one", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_article_content", { section_ids: ["s2"] });
 
     await openArticle(registered, "en", "The Sixth Sense");
 
     const report = await callTool(registered, "get_masking_report");
-    expect(report.sections_the_agent_has_read).toEqual([]);
+    expect(report.sections_read).toEqual([]);
   });
 
-  it("still tells the reader the agent read another article, without naming the heading", async () => {
+  it("still tells the reader the agent read another article, by title and count", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "read_withheld_section", { section_id: "s2", acknowledge: true });
+    await callTool(registered, "read_article_content", { section_ids: ["s2"] });
 
     await openArticle(registered, "en", "The Sixth Sense");
 
-    const panel = screen.getByText("Your agent has read").parentElement;
+    const panel = screen.getByRole("heading", { name: "Your agent has read" }).parentElement;
     expect(panel?.textContent).toContain("Attack on Titan — 1 section");
-    expect(panel?.textContent).not.toContain("Plot");
+  });
+
+  it("leaves the sections it read withheld on the page", async () => {
+    const registered = await renderWithAgent();
+
+    await openArticle(registered, "en", "Attack on Titan");
+    await callTool(registered, "read_article_content");
+
+    expect(screen.queryByText(/Eren Yeager lives in a walled town/)).toBeNull();
   });
 });
 
@@ -448,8 +457,8 @@ describe("a shared link", () => {
     const registered = await renderWithAgent();
     await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
 
-    const outline = await callTool(registered, "get_article_outline");
-    expect(outline.sensitivity).toBe(75);
+    const report = await callTool(registered, "get_masking_report");
+    expect(report.sensitivity).toBe(75);
     expect(screen.queryByText(/Eren Yeager lives in a walled town/)).toBeNull();
   });
 
@@ -467,8 +476,8 @@ describe("a shared link", () => {
     const registered = await renderWithAgent();
     await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
 
-    const outline = await callTool(registered, "get_article_outline");
-    expect(outline.sensitivity).toBe(50);
+    const report = await callTool(registered, "get_masking_report");
+    expect(report.sensitivity).toBe(50);
   });
 
   it("cannot choose which host the article is fetched from", async () => {
@@ -496,13 +505,5 @@ describe("the reader's sensitivity", () => {
     await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
 
     expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("50");
-  });
-
-  it("is stored when the agent sets it", async () => {
-    const registered = await renderWithAgent();
-
-    await callTool(registered, "set_spoiler_policy", { sensitivity: 0 });
-
-    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("0");
   });
 });

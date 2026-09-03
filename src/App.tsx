@@ -15,10 +15,9 @@ import { maskRows } from "./lib/mask";
 import {
   assessSection,
   countHidden,
-  headingId,
-  hiddenHeading,
   hiddenSentenceReason,
-  isSectionKnown,
+  maskWith,
+  type Decision,
   type Policy,
 } from "./lib/risk";
 import {
@@ -37,8 +36,6 @@ import {
   revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
-  sentElsewhere,
-  sentToAgent,
   type ScannedSection,
   type SectionDisclosure,
 } from "./lib/session";
@@ -64,12 +61,9 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 
 const SENSITIVITY_KEY = "unspoiled.sensitivity";
 
-/** A section the agent has read can still be one the reader is not allowed to see the name of. */
-const WITHHELD_SECTION = "a section whose heading is withheld";
-
 /** Three points on the scale worth a name, marked where they fall along the slider. */
 const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
-  { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
+  { sensitivity: 0, label: "Open", hint: "Withhold nothing the page has not been told to withhold" },
   { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
   { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
 ];
@@ -87,7 +81,7 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
 ];
 
 function sensitivityHint(sensitivity: number): string {
-  if (sensitivity === 0) return "Nothing is withheld — what your agent withheld included.";
+  if (sensitivity === 0) return "The page withholds nothing. Your agent's decisions still stand.";
   if (sensitivity < 25) return "Withholds how each plot summary ends.";
   if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
   if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
@@ -95,13 +89,12 @@ function sensitivityHint(sensitivity: number): string {
 }
 
 /**
- * The runs of every sentence and every heading, under the id the policy knows it by, so a reveal can
- * be timed from the length of what it opened.
+ * The runs of every sentence, under the id the policy knows it by, so a reveal can be timed from
+ * the length of what it opened.
  */
 function runsById(article: Article | null): Map<string, Run[]> {
   const runs = new Map<string, Run[]>();
   for (const section of article?.sections ?? []) {
-    runs.set(headingId(section), [{ kind: "text", text: sectionHeading(section) }]);
     for (const paragraph of section.paragraphs) {
       for (const sentence of paragraph.sentences) runs.set(sentence.id, sentence.runs);
     }
@@ -190,17 +183,13 @@ export default function App() {
       buildTools({
         article: () => articleRef.current,
         policy: () => policyRef.current,
-        setPolicy: (next) => {
-          if (next.sensitivity !== policyRef.current.sensitivity) {
-            window.localStorage.setItem(SENSITIVITY_KEY, String(next.sensitivity));
-          }
-          setPolicy(next);
-        },
+        setPolicy,
         openArticle: (toolLang, title) => openArticle(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
-        sent: () => sentToAgent(scannedRef.current, articleRef.current).flatMap((entry) => entry.ids),
-        markScanned: (open, sectionId, sent) =>
-          setScanned((current) => recordScanned(current, open, sectionId, sent)),
+        markScanned: (open, sectionIds) =>
+          setScanned((current) =>
+            sectionIds.reduce((all, sectionId) => recordScanned(all, open, sectionId), current),
+          ),
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
@@ -247,22 +236,16 @@ export default function App() {
   const scannedHeadings = useMemo(() => {
     if (!article) return [];
     const ids = scannedForArticle(scanned, article);
-    return article.sections
-      .filter((section) => ids.includes(section.id))
-      .map((section) => (hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section)));
-  }, [article, policy, scanned]);
+    return article.sections.filter((section) => ids.includes(section.id)).map(sectionHeading);
+  }, [article, scanned]);
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
 
-  const openedOnPage = useMemo(() => ledgerRows(revealedOnPage(article, policy), policy), [article, policy]);
-
-  const sentToTheAgent = useMemo(() => ledgerRows(sentToAgent(scanned, article), policy), [article, policy, scanned]);
-
-  const sentFromElsewhere = useMemo(() => sentElsewhere(scanned, article), [article, scanned]);
+  const openedOnPage = useMemo(() => ledgerRows(revealedOnPage(article, policy)), [article, policy]);
 
   const openedCount = sentenceTotal(openedOnPage);
 
-  const sentCount = sentenceTotal(sentToTheAgent) + sentenceTotal(sentFromElsewhere);
+  const readCount = scannedHeadings.length + elsewhere.reduce((total, group) => total + group.sections, 0);
 
   /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
   const chooseSensitivity = useCallback((sensitivity: number) => {
@@ -270,15 +253,14 @@ export default function App() {
     setPolicy((current) => ({ ...current, sensitivity }));
   }, []);
 
-  const reveal = (sentenceIds: string[]) =>
-    setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
+  /**
+   * The reader reaching for a sentence lands in the same two sets the agent's decisions do, so a
+   * tap can take back what an agent hid and an agent can take back what the wording rules withheld.
+   * Only `apply_mask` writes to `decisions`: what the reader did to their own page is on the page.
+   */
+  const reveal = (sentenceIds: string[]) => setPolicy((current) => maskWith(current, sentenceIds, []));
 
-  const hide = (sentenceIds: string[]) =>
-    setPolicy((current) => {
-      const revealed = new Set(current.revealed);
-      for (const id of sentenceIds) revealed.delete(id);
-      return { ...current, revealed };
-    });
+  const hide = (sentenceIds: string[]) => setPolicy((current) => maskWith(current, [], sentenceIds));
 
   /**
    * Which sentences arrive a word at a time, and when each of them begins. Opening one is a
@@ -334,16 +316,16 @@ export default function App() {
   /** Walking the article for every sentence is worth doing once, not once per reveal. */
   const flowSource = useMemo(() => ({ runs: runsById(article), lang: article?.lang ?? "en" }), [article]);
 
-  const revealedBefore = useRef(policy.revealed);
+  const revealedBefore = useRef(policy.shown);
   /*
    * Runs before the browser paints: the sentences a reveal opens must be drawn as flowing words
    * from their very first frame, or the whole sentence shows for an instant before the words start.
    */
   useLayoutEffect(() => {
     const before = revealedBefore.current;
-    revealedBefore.current = policy.revealed;
-    const opened = [...policy.revealed].filter((id) => !before.has(id));
-    const closed = [...before].filter((id) => !policy.revealed.has(id));
+    revealedBefore.current = policy.shown;
+    const opened = [...policy.shown].filter((id) => !before.has(id));
+    const closed = [...before].filter((id) => !policy.shown.has(id));
     if (opened.length === 0 && closed.length === 0) return;
     followRef.current = opened.length > 0;
     const { runs, lang } = flowSource;
@@ -354,7 +336,7 @@ export default function App() {
       opened.forEach((id, order) => next.set(id, timings[order]));
       return next;
     });
-  }, [flowSource, policy.revealed]);
+  }, [flowSource, policy.shown]);
 
   return (
     <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
@@ -447,48 +429,11 @@ export default function App() {
               </div>
               <p className="hidden text-xs leading-5 text-muted lg:block">{sensitivityHint(policy.sensitivity)}</p>
             </div>
-            {policy.alreadyKnows.length > 0 && (
-              <div className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
-                <p className="font-medium">Your agent says you already know</p>
-                <ul className="mt-1 list-inside list-disc">
-                  {policy.alreadyKnows.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-                <button
-                  onClick={() => setPolicy((current) => ({ ...current, alreadyKnows: [] }))}
-                  className="mt-1 underline"
-                >
-                  That is wrong — clear it
-                </button>
-              </div>
-            )}
-            {policy.notes && (
-              <p className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
-                Your agent said: {policy.notes}
-              </p>
-            )}
           </section>
 
-          {scanned.length > 0 && (
-            <section>
-              <h3 className="font-semibold">Your agent has read</h3>
-              {scannedHeadings.length > 0 && (
-                <p className="mt-1 rounded-lg bg-alert-surface px-3 py-2 text-xs text-alert-ink">
-                  {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
-                </p>
-              )}
-              {elsewhere.length > 0 && (
-                <ul className="mt-1 space-y-1 text-xs text-muted">
-                  {elsewhere.map((group) => (
-                    <li key={group.articleTitle}>
-                      {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+          <Panel title="Your agent's decisions" count={policy.decisions.length}>
+            <Decisions decisions={policy.decisions} />
+          </Panel>
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
             <Panel title="Revealed on your page" count={openedCount}>
@@ -498,13 +443,8 @@ export default function App() {
                 className="border border-line bg-surface text-mask-ink"
               />
             </Panel>
-            <Panel title="Text sent to your agent" count={sentCount}>
-              <Ledger
-                title="Text sent to your agent"
-                rows={sentToTheAgent}
-                elsewhere={sentFromElsewhere}
-                className="border border-alert-line bg-alert-surface text-alert-ink"
-              />
+            <Panel title="Your agent has read" count={readCount}>
+              <HasRead sections={scannedHeadings} elsewhere={elsewhere} />
             </Panel>
           </div>
 
@@ -606,10 +546,10 @@ export default function App() {
 
 type LedgerRow = { sectionId: string; label: string; sentences: number };
 
-function ledgerRows(disclosures: SectionDisclosure[], policy: Policy): LedgerRow[] {
+function ledgerRows(disclosures: SectionDisclosure[]): LedgerRow[] {
   return disclosures.map(({ section, ids }) => ({
     sectionId: section.id,
-    label: hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section),
+    label: sectionHeading(section),
     sentences: ids.length,
   }));
 }
@@ -631,39 +571,81 @@ function Panel({ title, count, children }: { title: string; count: number; child
 }
 
 /**
- * The pair of ledgers is the claim the reader can check: what this page opened on their screen,
- * and what of the withheld text left it. Both stay on screen empty, so the absence of a disclosure
- * is as visible as a disclosure.
+ * What the agent decided, in the words it gave for deciding it, newest first. The agent's judgement
+ * is the only part of the filtering that is not written down anywhere else on the page, so this is
+ * where the reader checks that what they are looking at is what they asked for.
  */
-function Ledger({
-  title,
-  rows,
-  elsewhere = [],
-  className,
-}: {
-  title: string;
-  rows: LedgerRow[];
-  elsewhere?: { articleTitle: string; sentences: number }[];
-  className: string;
-}) {
+function Decisions({ decisions }: { decisions: Decision[] }) {
+  const newestFirst = [...decisions].reverse();
   return (
     <section>
-      <h3 className="font-semibold">{title}</h3>
-      {rows.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
-      {rows.length > 0 && (
-        <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
-          {rows.map((row) => (
-            <li key={row.sectionId}>
-              {row.label} — {sentenceCount(row.sentences)}
+      <h3 className="font-semibold">Your agent&apos;s decisions</h3>
+      {newestFirst.length === 0 ? (
+        <p className="mt-1 text-xs text-muted">Nothing yet. Ask your agent to filter this page.</p>
+      ) : (
+        <ul className="mt-1 space-y-1 text-xs">
+          {newestFirst.map((decision, index) => (
+            <li key={newestFirst.length - index} className="rounded-lg border border-line bg-surface px-3 py-2">
+              <span className="block">{decision.reason}</span>
+              <span className="block tabular-nums text-muted">
+                {decision.show.length} shown · {decision.hide.length} hidden
+              </span>
             </li>
           ))}
         </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The sections the agent has read in full, which is every section it was asked to judge. It knows
+ * those endings for the rest of the conversation, so the reader is told which ones rather than
+ * left to infer it from what came back masked.
+ */
+function HasRead({
+  sections,
+  elsewhere,
+}: {
+  sections: string[];
+  elsewhere: { articleTitle: string; sections: number }[];
+}) {
+  return (
+    <section>
+      <h3 className="font-semibold">Your agent has read</h3>
+      {sections.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
+      {sections.length > 0 && (
+        <p className="mt-1 rounded-lg bg-alert-surface px-3 py-2 text-xs text-alert-ink">
+          {sections.join(", ")}. It knows those spoilers for the rest of this conversation.
+        </p>
       )}
       {elsewhere.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-xs text-muted">
           {elsewhere.map((group) => (
             <li key={group.articleTitle}>
-              {group.articleTitle} — {sentenceCount(group.sentences)}
+              {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What this page has opened on the reader's screen, section by section. It stays on screen empty,
+ * so the absence of a disclosure is as visible as a disclosure.
+ */
+function Ledger({ title, rows, className }: { title: string; rows: LedgerRow[]; className: string }) {
+  return (
+    <section>
+      <h3 className="font-semibold">{title}</h3>
+      {rows.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
+      {rows.length > 0 && (
+        <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
+          {rows.map((row) => (
+            <li key={row.sectionId}>
+              {row.label} — {sentenceCount(row.sentences)}
             </li>
           ))}
         </ul>
@@ -829,7 +811,6 @@ function SectionView({
   onOpen: (title: string) => void;
 }) {
   const risk = assessSection(section);
-  const known = isSectionKnown(policy, section.id);
   const groups = section.paragraphs.map((paragraph) => groupSentences(paragraph, section, policy));
   const hidden = groups.reduce(
     (total, group) => total + group.reduce((count, run) => count + (run.hidden ? run.sentences.length : 0), 0),
@@ -837,26 +818,12 @@ function SectionView({
   );
   const withheld = groups.filter((group) => group.every((run) => run.hidden)).length;
   const opened = section.paragraphs.flatMap((paragraph) =>
-    paragraph.sentences.filter((sentence) => policy.revealed.has(sentence.id)).map((sentence) => sentence.id),
-  );
-  const heading = (
-    <SectionHeading
-      section={section}
-      hidden={hidden}
-      known={known}
-      policy={policy}
-      lang={lang}
-      flowing={flowing}
-      opened={opened}
-      onReveal={onReveal}
-      onHide={onHide}
-      onOpen={onOpen}
-    />
+    paragraph.sentences.filter((sentence) => policy.shown.has(sentence.id)).map((sentence) => sentence.id),
   );
 
   return (
     <section className="mt-6">
-      {heading}
+      <SectionHeading section={section} hidden={hidden} opened={opened} onHide={onHide} />
       {withheld > 0 && (
         <p className="unspoiled-mask mt-2 text-xs text-muted">
           {withheld} of {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in
@@ -895,7 +862,7 @@ function SectionView({
                       sentence={sentence}
                       lang={lang}
                       timing={flowing.get(sentence.id)}
-                      onHide={policy.revealed.has(sentence.id) ? onHide : null}
+                      onHide={policy.shown.has(sentence.id) ? onHide : null}
                       onOpen={onOpen}
                     />
                   )),
@@ -1132,68 +1099,28 @@ function FlowingText({
   );
 }
 
+/**
+ * A heading names its section and is never withheld: an agent that cannot say which section it
+ * masked cannot explain its own decision, and the reader cannot check it.
+ */
 function SectionHeading({
   section,
   hidden,
-  known,
-  policy,
-  lang,
-  flowing,
   opened,
-  onReveal,
   onHide,
-  onOpen,
 }: {
   section: Section;
   hidden: number;
-  known: string | null;
-  policy: Policy;
-  lang: Lang;
-  flowing: ReadonlyMap<string, FlowTiming>;
   opened: string[];
-  onReveal: (ids: string[]) => void;
   onHide: (ids: string[]) => void;
-  onOpen: (title: string) => void;
 }) {
-  const withheldHeading = hiddenHeading(section, policy);
-  const id = headingId(section);
-  const text = sectionHeading(section);
-  const heading = policy.revealed.has(id) ? (
-    <SentenceView
-      sentence={{ id, text, runs: [{ kind: "text", text }] }}
-      lang={lang}
-      timing={flowing.get(id)}
-      onHide={onHide}
-      onOpen={onOpen}
-      label="Hide this heading again"
-    />
-  ) : (
-    sectionHeading(section)
-  );
-
   return (
     <h3 className="flex flex-wrap items-baseline gap-2 border-b border-line pb-1 text-lg font-semibold">
-      {withheldHeading ? (
-        <button
-          onClick={() => onReveal([id])}
-          title={withheldHeading.reason}
-          className="unspoiled-mask rounded bg-mask px-2 py-0.5 text-sm font-medium text-mask-ink hover:bg-mask-hover"
-        >
-          Heading withheld · reveal
-        </button>
-      ) : (
-        heading
-      )}
-      {known ? (
-        <span className="rounded bg-warn-badge px-1.5 py-0.5 text-[11px] font-medium text-warn-ink">
-          shown — {known}
+      {sectionHeading(section)}
+      {hidden > 0 && (
+        <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-mask-ink">
+          {hidden} withheld
         </span>
-      ) : (
-        hidden > 0 && (
-          <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-mask-ink">
-            {hidden} withheld
-          </span>
-        )
       )}
       {opened.length > 1 && (
         <button

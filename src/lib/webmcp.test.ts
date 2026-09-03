@@ -113,7 +113,7 @@ function installChromeAgent(alreadyInBrowser: string[] = []) {
 describe("registering the same tools again", () => {
   it("leaves every tool exposed and reports no error", async () => {
     const { registered } = installChromeAgent();
-    const definitions = () => [tool("list_sections", () => ({ sections: [] })), tool("get_article_outline", () => ({}))];
+    const definitions = () => [tool("list_sections", () => ({ sections: [] })), tool("get_masking_report", () => ({}))];
 
     await registerTools(definitions(), () => {}).ready;
     const second = await registerTools(definitions(), () => {}).ready;
@@ -137,9 +137,9 @@ describe("registering the same tools again", () => {
   });
 
   it("counts a name the browser already holds as exposed", async () => {
-    const { registered } = installChromeAgent(["read_withheld_section"]);
+    const { registered } = installChromeAgent(["read_article_content"]);
 
-    const state = await registerTools([tool("read_withheld_section", () => ({}))], () => {}).ready;
+    const state = await registerTools([tool("read_article_content", () => ({}))], () => {}).ready;
 
     expect(state.error).toBeUndefined();
     expect(state.toolCount).toBe(1);
@@ -163,7 +163,7 @@ describe("registering the same tools again", () => {
 describe("a tool the page has taken back", () => {
   it("tells the agent it is no longer offered instead of running the old handler", async () => {
     const { registered } = installChromeAgent();
-    const registration = registerTools([tool("reveal_withheld_sentences", () => ({ revealed: 4 }))], () => {});
+    const registration = registerTools([tool("apply_mask", () => ({ show: 4 }))], () => {});
     await registration.ready;
 
     registration.unregister();

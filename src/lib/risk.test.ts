@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Section } from "./segment";
 import {
-  assessHeading,
   assessSection,
   assessSentences,
   countHidden,
-  headingId,
-  hiddenHeading,
   hiddenSentence,
+  hiddenSentenceReason,
+  maskWith,
   newPolicy,
   type Policy,
 } from "./risk";
@@ -141,11 +140,6 @@ describe("how a sentence is scored", () => {
     expect(assessmentAt(plot, 1).risk).toBe(100);
     expect(assessmentAt(plot, 1).level).toBe("spoiler");
   });
-
-  it("scores a heading that names the reveal, and leaves other headings unscored", () => {
-    expect(assessHeading(section("Series finale"))).toMatchObject({ risk: 85 });
-    expect(assessHeading(section("Production"))).toBeNull();
-  });
 });
 
 describe("the sensitivity threshold", () => {
@@ -200,67 +194,53 @@ describe("the presets on the slider", () => {
 describe("what overrides what", () => {
   const meta = section("Production", ["The film was shot on location over eleven weeks."]);
   const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
-  const known = new Map([[meta.id, "you have seen it"]]);
 
-  it("withholds a sentence the agent asked to withhold", () => {
-    expect(hiddenSentence(firstSentence(meta), meta, at(75, { withheld: new Set(["p0.0"]) }))).toBe(true);
+  it("withholds a sentence a decision hid, whatever the wording rules make of it", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, at(75, { hidden: new Set(["p0.0"]) }))).toBe(true);
   });
 
-  it("keeps withholding it at the lowest sensitivity that withholds anything", () => {
-    expect(hiddenSentence(firstSentence(meta), meta, at(1, { withheld: new Set(["p0.0"]) }))).toBe(true);
+  it("keeps withholding it at the sensitivity that withholds nothing else", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, at(0, { hidden: new Set(["p0.0"]) }))).toBe(true);
   });
 
-  it("shows an agent-withheld sentence at zero", () => {
-    expect(hiddenSentence(firstSentence(meta), meta, at(0, { withheld: new Set(["p0.0"]) }))).toBe(false);
+  it("shows a sentence a decision showed, at the sensitivity that withholds everything", () => {
+    expect(hiddenSentence(firstSentence(plot), plot, at(100, { shown: new Set(["p0.0"]) }))).toBe(false);
   });
 
-  it("shows an agent-withheld sentence once the section is marked known", () => {
-    const policy = at(75, { withheld: new Set(["p0.0"]), knownSections: known });
-    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
+  it("withholds a sentence that a decision both showed and hid", () => {
+    const policy = at(0, { shown: new Set(["p0.0"]), hidden: new Set(["p0.0"]) });
+    expect(hiddenSentence(firstSentence(plot), plot, policy)).toBe(true);
   });
 
-  it("shows an agent-withheld sentence the reader then revealed", () => {
-    const policy = at(75, { withheld: new Set(["p0.0"]), revealed: new Set(["p0.0"]) });
-    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
+  it("says a sentence is withheld by a decision without naming what is in it", () => {
+    const policy = at(75, { hidden: new Set(["p0.0"]) });
+    expect(hiddenSentenceReason(firstSentence(meta), meta, policy)?.reason).toBe(
+      "withheld by a decision on this page",
+    );
+  });
+});
+
+describe("applying a decision to the policy", () => {
+  it("starts the reader with nothing shown, nothing hidden and no decisions", () => {
+    expect(newPolicy()).toMatchObject({ shown: new Set(), hidden: new Set(), decisions: [] });
   });
 
-  it("shows a revealed sentence at the highest sensitivity", () => {
-    expect(hiddenSentence(firstSentence(plot), plot, at(100, { revealed: new Set(["p0.0"]) }))).toBe(false);
+  it("takes a shown sentence back out of hidden", () => {
+    const policy = maskWith(at(75, { hidden: new Set(["p0.0"]) }), ["p0.0"], []);
+    expect([...policy.hidden]).toEqual([]);
+    expect([...policy.shown]).toEqual(["p0.0"]);
   });
 
-  it("withholds a heading the agent asked to withhold", () => {
-    expect(hiddenHeading(meta, at(75, { withheld: new Set([headingId(meta)]) }))).not.toBeNull();
+  it("takes a hidden sentence back out of shown", () => {
+    const policy = maskWith(at(75, { shown: new Set(["p0.0"]) }), [], ["p0.0"]);
+    expect([...policy.shown]).toEqual([]);
+    expect([...policy.hidden]).toEqual(["p0.0"]);
   });
 
-  it("says why a heading is withheld without naming it", () => {
-    const policy = at(75, { withheld: new Set([headingId(meta)]) });
-    expect(hiddenHeading(meta, policy)?.reason).not.toContain("Production");
-  });
-
-  it("shows an agent-withheld heading at zero", () => {
-    expect(hiddenHeading(meta, at(0, { withheld: new Set([headingId(meta)]) }))).toBeNull();
-  });
-
-  it("shows an agent-withheld heading once revealed", () => {
-    const ids = new Set([headingId(meta)]);
-    expect(hiddenHeading(meta, at(75, { withheld: ids, revealed: ids }))).toBeNull();
-  });
-
-  it("shows an agent-withheld heading once the section is marked known", () => {
-    const policy = at(75, { withheld: new Set([headingId(meta)]), knownSections: known });
-    expect(hiddenHeading(meta, policy)).toBeNull();
-  });
-
-  it("keeps withholding a narrative heading that names the reveal", () => {
-    const finale = section("Series finale", ["He was dead the whole time."]);
-    expect(hiddenHeading(finale, newPolicy())?.reason).toBe("the heading itself names the reveal");
-    expect(hiddenHeading(plot, newPolicy())).toBeNull();
-  });
-
-  it("shows a heading that names the reveal once the sensitivity drops below its score", () => {
-    const finale = section("Series finale", ["He was dead the whole time."]);
-    expect(hiddenHeading(finale, at(15))).toBeNull();
-    expect(hiddenHeading(finale, at(16))).not.toBeNull();
+  it("hides a sentence named on both sides of one decision", () => {
+    const policy = maskWith(newPolicy(), ["p0.0"], ["p0.0"]);
+    expect([...policy.hidden]).toEqual(["p0.0"]);
+    expect([...policy.shown]).toEqual([]);
   });
 });
 
