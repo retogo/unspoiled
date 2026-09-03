@@ -9,6 +9,7 @@ import {
   isSectionKnown,
   type Policy,
 } from "./risk";
+import { revealedOnPage } from "./session";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
@@ -29,7 +30,9 @@ export type ToolContext = {
   setPolicy: (next: Policy) => void;
   openArticle: (lang: Lang, title: string) => Promise<OpenResult>;
   scanned: () => string[];
-  markScanned: (article: Article, sectionId: string) => void;
+  sent: () => string[];
+  /** `sent` is the ids whose text this particular call handed over, not the whole section. */
+  markScanned: (article: Article, sectionId: string, sent: string[]) => void;
 };
 
 const noInput = { type: "object", properties: {}, additionalProperties: false };
@@ -220,7 +223,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "reveal_withheld_sentences",
       description:
-        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a heading_id from get_article_outline or describe_withheld_content to reveal a withheld heading. The text is shown on their screen and returned here — which means you have read the spoilers, so every section this opens is listed on screen next to the ones you read with read_withheld_section.",
+        "Reveal specific withheld sentences, only when the reader has explicitly asked for them. Pass a heading_id from get_article_outline or describe_withheld_content to reveal a withheld heading. The text is shown on their screen and returned here — which means you have read the spoilers, so each sentence this opens is counted on screen under both 'Revealed on your page' and 'Text sent to your agent'.",
       inputSchema: {
         type: "object",
         properties: {
@@ -236,20 +239,21 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const revealed = [];
         const opened = [];
         for (const section of article.sections) {
-          let readWithheldText = false;
+          /** Only text the page was withholding is a disclosure; the rest was already on screen. */
+          const sent = [];
           if (ids.includes(headingId(section))) {
-            readWithheldText = hiddenHeading(section, policy) !== null;
+            if (hiddenHeading(section, policy)) sent.push(headingId(section));
             revealed.push({ sentence_id: headingId(section), text: section.heading });
           }
           for (const paragraph of section.paragraphs) {
             for (const sentence of paragraph.sentences) {
               if (!ids.includes(sentence.id)) continue;
-              if (hiddenSentence(sentence, section, policy)) readWithheldText = true;
+              if (hiddenSentence(sentence, section, policy)) sent.push(sentence.id);
               revealed.push({ sentence_id: sentence.id, text: sentence.text });
             }
           }
-          if (!readWithheldText) continue;
-          context.markScanned(article, section.id);
+          if (sent.length === 0) continue;
+          context.markScanned(article, section.id, sent);
           opened.push(section.id);
         }
         context.setPolicy({ ...policy, revealed: new Set([...policy.revealed, ...ids]) });
@@ -259,7 +263,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_masking_report",
       description:
-        "Report what is currently withheld across the whole article and why, so the reader can audit the filtering.",
+        "Report what is currently withheld across the whole article and why, so the reader can audit the filtering. It also returns the two ledgers the reader sees beside the article: revealed_on_page is what has been opened on their screen, text_sent_to_agent is the withheld text that has actually reached you. Ids only — a withheld heading is never named in either.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
@@ -269,6 +273,8 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           title: article.displayTitle,
           policy: policyReport(policy),
           sections_the_agent_has_read: context.scanned(),
+          revealed_on_page: revealedOnPage(article, policy).flatMap((disclosure) => disclosure.ids),
+          text_sent_to_agent: context.sent(),
           total_hidden: sections.reduce((sum, section) => sum + section.hidden_sentences, 0),
           total_visible: sections.reduce((sum, section) => sum + section.visible_sentences, 0),
           sections,
@@ -407,7 +413,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "read_withheld_section",
       description:
-        "Read a withheld section in full, including the spoilers. This is a one-way door: once you read it you know the ending, and you may leak it later in conversation. Only call this with acknowledge=true after the reader has explicitly asked you to look. The reader is shown on screen which sections you have read.",
+        "Read a withheld section in full, including the spoilers. This is a one-way door: once you read it you know the ending, and you may leak it later in conversation. Only call this with acknowledge=true after the reader has explicitly asked you to look. Every sentence it returns is counted on their screen under 'Text sent to your agent', and the section stays hidden on the page.",
       inputSchema: {
         type: "object",
         properties: {
@@ -430,14 +436,13 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
               "Withheld text is not returned without acknowledge=true. Ask the reader whether they want the spoilers first.",
           };
         }
-        context.markScanned(article, section.id);
-        return {
-          section_id: section.id,
-          heading: section.heading,
-          sentences: section.paragraphs.flatMap((paragraph) =>
-            paragraph.sentences.map((sentence) => ({ sentence_id: sentence.id, text: sentence.text })),
-          ),
-        };
+        const sentences = section.paragraphs.flatMap((paragraph) =>
+          paragraph.sentences.map((sentence) => ({ sentence_id: sentence.id, text: sentence.text })),
+        );
+        /** This door hands over the body whole, and the heading too when the page was hiding it. */
+        const heading = hiddenHeading(section, context.policy()) ? [headingId(section)] : [];
+        context.markScanned(article, section.id, [...heading, ...sentences.map((s) => s.sentence_id)]);
+        return { section_id: section.id, heading: section.heading, sentences };
       },
     },
     {
