@@ -71,6 +71,12 @@ html[data-theme="dark"] {
  * at all. What is animated is arrival: a sentence the reader has just opened resolves out of a
  * blur, and the placeholder that takes its place arrives the same way. A sentence the reader opened
  * on purpose arrives word by word instead, each word carrying its own delay.
+ *
+ * The fill is `backwards` and never `both`: each of these ends on the value the element already has,
+ * so filling forwards would buy nothing and cost a great deal. A reveal leaves hundreds of words
+ * behind it, and an animation that fills forwards is kept alive for the life of the page, holding a
+ * `filter` on every word it ever touched — which is enough to make the whole article expensive to
+ * paint by the third or fourth reveal.
  */
 @keyframes unspoiled-text {
   from {
@@ -97,15 +103,15 @@ html[data-theme="dark"] {
 }
 
 .unspoiled-text {
-  animation: unspoiled-text 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: unspoiled-text 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .unspoiled-mask {
-  animation: unspoiled-mask 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: unspoiled-mask 220ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 .unspoiled-flow {
-  animation: unspoiled-text 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: unspoiled-text 320ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
