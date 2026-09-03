@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Article, Paragraph } from "./segment";
-import { defaultPolicy, type Policy } from "./risk";
+import { newPolicy, type Policy } from "./risk";
 import { buildTools } from "./tools";
 
 function paragraph(id: string, texts: string[]): Paragraph {
@@ -55,7 +55,7 @@ function fightClub(): Article {
 }
 
 function harness() {
-  let policy: Policy = defaultPolicy;
+  let policy: Policy = newPolicy();
   const scanned: string[] = [];
   const article = fightClub();
   const tools = buildTools({
@@ -151,13 +151,83 @@ describe("what mark_sections_known claims to unhide", () => {
   });
 });
 
-describe("balanced withholds the reveal in a reception section", () => {
+describe("the middle of the scale withholds the reveal in a reception section", () => {
   it("hides the twist sentence but keeps the box office", () => {
     const { call } = harness();
-    call("set_spoiler_policy", { level: "balanced" });
+    call("set_spoiler_policy", { sensitivity: 50 });
     const text = JSON.stringify(call("get_visible_section_text", { section_id: "s2" }));
     expect(text).not.toContain("Tyler are one man");
     expect(text).toContain("101 million dollars");
+  });
+});
+
+describe("set_spoiler_policy", () => {
+  it("applies the sensitivity the agent asked for", () => {
+    const { call, policy } = harness();
+    expect(call("set_spoiler_policy", { sensitivity: 20 })).toMatchObject({ applied: 20 });
+    expect(policy().sensitivity).toBe(20);
+  });
+
+  it("reports the sensitivity back through the outline", () => {
+    const { call } = harness();
+    call("set_spoiler_policy", { sensitivity: 40 });
+    expect(call("get_article_outline").sensitivity).toBe(40);
+  });
+
+  it.each([-1, 101, 62.5, "50", null, undefined])("refuses %s, which is not a point on the scale", (sensitivity) => {
+    const { call, policy } = harness();
+    expect(() => call("set_spoiler_policy", { sensitivity })).toThrow(/0 to 100/);
+    expect(policy().sensitivity).toBe(newPolicy().sensitivity);
+  });
+
+  it("accepts both ends of the scale", () => {
+    const { call, policy } = harness();
+    call("set_spoiler_policy", { sensitivity: 0 });
+    expect(policy().sensitivity).toBe(0);
+    call("set_spoiler_policy", { sensitivity: 100 });
+    expect(policy().sensitivity).toBe(100);
+  });
+
+  it("keeps what the reader already knows when only the sensitivity moves", () => {
+    const { call, policy } = harness();
+    call("set_spoiler_policy", { sensitivity: 50, already_knows: ["read the original manga"] });
+    call("set_spoiler_policy", { sensitivity: 20 });
+    expect(policy().alreadyKnows).toEqual(["read the original manga"]);
+  });
+});
+
+describe("describe_withheld_content", () => {
+  it("scores each withheld sentence so the agent can say how far to lower the slider", () => {
+    const { call } = harness();
+    const hidden = call("describe_withheld_content", { section_id: "s1" }).hidden as unknown as {
+      sentence_id: string;
+      risk: number;
+    }[];
+    expect(hidden.map((item) => item.risk)).toEqual([60, 80, 100]);
+  });
+
+  it("stops describing a sentence once the reader has lowered the slider past it", () => {
+    const { call } = harness();
+    call("set_spoiler_policy", { sensitivity: 35 });
+    const hidden = call("describe_withheld_content", { section_id: "s1" }).hidden as unknown as { risk: number }[];
+    expect(hidden.map((item) => item.risk)).toEqual([80, 100]);
+  });
+});
+
+describe("get_masking_report", () => {
+  it("states the policy in a shape the agent can read back", () => {
+    const { call } = harness();
+    call("set_spoiler_policy", { sensitivity: 50 });
+    call("withhold_article_content", { sentence_ids: ["p0.0"], because: "the reader asked" });
+    call("mark_sections_known", { section_ids: ["s2"], because: "you have seen it" });
+    expect(call("get_masking_report").policy).toEqual({
+      sensitivity: 50,
+      revealed: [],
+      withheld: ["p0.0"],
+      already_knows: [],
+      known_sections: [{ section_id: "s2", because: "you have seen it" }],
+      notes: "the reader asked",
+    });
   });
 });
 

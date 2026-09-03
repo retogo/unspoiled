@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   assessSection,
   countHidden,
@@ -28,16 +28,27 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
   { lang: "ja", title: "シックス・センス", note: "日本語版でも同じことが起きる" },
 ];
 
-const LEVEL_KEY = "unspoiled.level";
+const SENSITIVITY_KEY = "unspoiled.sensitivity";
 
-const POLICY_LEVELS: { level: Policy["level"]; label: string; hint: string }[] = [
-  { level: "strict", label: "Strict", hint: "Withhold narrative and anything suspicious" },
-  { level: "balanced", label: "Balanced", hint: "Withhold plot sections and outright reveals" },
-  { level: "open", label: "Open", hint: "Show everything, your agent's withholding included" },
+/** Three points on the scale worth a name, marked where they fall along the slider. */
+const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
+  { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
+  { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
+  { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
 ];
 
+function sensitivityHint(sensitivity: number): string {
+  if (sensitivity === 0) return "Nothing is withheld — what your agent withheld included.";
+  if (sensitivity < 25) return "Withholds how each plot summary ends.";
+  if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
+  if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
+  return "Withholds plot summaries, analysis, and any wording that hints at the ending.";
+}
+
 export default function App() {
-  const [start] = useState(() => readSessionStart(window.location.search, window.localStorage.getItem(LEVEL_KEY)));
+  const [start] = useState(() =>
+    readSessionStart(window.location.search, window.localStorage.getItem(SENSITIVITY_KEY)),
+  );
   const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
   const [term, setTerm] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -91,7 +102,9 @@ export default function App() {
         article: () => articleRef.current,
         policy: () => policyRef.current,
         setPolicy: (next) => {
-          if (next.level !== policyRef.current.level) window.localStorage.setItem(LEVEL_KEY, next.level);
+          if (next.sensitivity !== policyRef.current.sensitivity) {
+            window.localStorage.setItem(SENSITIVITY_KEY, String(next.sensitivity));
+          }
           setPolicy(next);
         },
         openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
@@ -117,13 +130,13 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams();
-    params.set("level", policy.level);
+    params.set("sensitivity", String(policy.sensitivity));
     if (article) {
       params.set("lang", article.lang);
       params.set("title", article.title);
     }
     window.history.replaceState(null, "", `?${params}`);
-  }, [article, policy.level]);
+  }, [article, policy.sensitivity]);
 
   const search = useCallback(async () => {
     if (term.trim().length === 0) return;
@@ -140,6 +153,7 @@ export default function App() {
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
 
+  /** A section the agent has read can still be one the reader is not allowed to see the name of. */
   const scannedHeadings = useMemo(() => {
     if (!article) return [];
     const ids = scannedForArticle(scanned, article);
@@ -150,14 +164,14 @@ export default function App() {
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
 
-  /** Only a level the reader or their agent chose is remembered; one that arrived in a link is not. */
-  const chooseLevel = useCallback((level: Policy["level"]) => {
-    window.localStorage.setItem(LEVEL_KEY, level);
-    setPolicy((current) => ({ ...current, level }));
+  /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
+  const chooseSensitivity = useCallback((sensitivity: number) => {
+    window.localStorage.setItem(SENSITIVITY_KEY, String(sensitivity));
+    setPolicy((current) => ({ ...current, sensitivity }));
   }, []);
 
   const reveal = (sentenceIds: string[]) =>
-    setPolicy((current) => ({ ...current, revealed: [...new Set([...current.revealed, ...sentenceIds])] }));
+    setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -264,21 +278,49 @@ export default function App() {
         <aside className="space-y-5 text-sm lg:sticky lg:top-6 lg:self-start">
           <section>
             <h3 className="font-semibold">Your policy</h3>
-            <div className="mt-2 space-y-1">
-              {POLICY_LEVELS.map((option) => (
-                <button
-                  key={option.level}
-                  onClick={() => chooseLevel(option.level)}
-                  className={`block w-full rounded-lg border px-3 py-2 text-left ${
-                    policy.level === option.level
-                      ? "border-ink bg-white font-medium"
-                      : "border-zinc-200 bg-white/60 text-zinc-600"
-                  }`}
-                >
-                  {option.label}
-                  <span className="block text-xs text-zinc-500">{option.hint}</span>
-                </button>
-              ))}
+            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 pt-2.5 pb-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <label htmlFor="sensitivity" className="font-medium tabular-nums">
+                  Sensitivity {policy.sensitivity}
+                </label>
+                {counts && (
+                  <span className="text-xs tabular-nums text-zinc-500">
+                    {counts.hidden} of {counts.total} sentences withheld
+                  </span>
+                )}
+              </div>
+              <input
+                id="sensitivity"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={policy.sensitivity}
+                onChange={(event) => chooseSensitivity(Number(event.target.value))}
+                style={{ "--sensitivity-fill": `${policy.sensitivity}%` } as CSSProperties}
+                className="sensitivity mt-2.5 w-full"
+              />
+              <div className="relative mt-0.5 mb-1 h-8">
+                {SENSITIVITY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => chooseSensitivity(preset.sensitivity)}
+                    title={preset.hint}
+                    style={{ left: `${preset.sensitivity}%` }}
+                    className={`absolute top-0 flex flex-col items-center gap-1 text-[11px] ${
+                      preset.sensitivity === 0 ? "" : "-translate-x-1/2"
+                    } ${
+                      policy.sensitivity === preset.sensitivity
+                        ? "font-medium text-ink"
+                        : "text-zinc-500 hover:text-ink"
+                    }`}
+                  >
+                    <span className="h-1.5 w-px bg-zinc-300" />
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs leading-5 text-zinc-500">{sensitivityHint(policy.sensitivity)}</p>
             </div>
             {policy.alreadyKnows.length > 0 && (
               <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -367,12 +409,16 @@ function SectionView({
   const risk = assessSection(section);
   const known = isSectionKnown(policy, section.id);
   const groups = section.paragraphs.map((paragraph) => groupSentences(paragraph, section, policy));
+  const hidden = groups.reduce(
+    (total, group) => total + group.reduce((count, run) => count + (run.hidden ? run.sentences.length : 0), 0),
+    0,
+  );
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
 
   if (allHidden) {
     return (
       <section className="mt-6">
-        <SectionHeading section={section} risk={risk} known={known} policy={policy} onReveal={onReveal} />
+        <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
         <p className="mt-2 text-xs text-zinc-500">
           {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
           open only as far as you have watched.
@@ -399,7 +445,7 @@ function SectionView({
 
   return (
     <section className="mt-6">
-      <SectionHeading section={section} risk={risk} known={known} policy={policy} onReveal={onReveal} />
+      <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
           {groups[index].map((run) =>
@@ -426,13 +472,13 @@ function SectionView({
 
 function SectionHeading({
   section,
-  risk,
+  hidden,
   known,
   policy,
   onReveal,
 }: {
   section: Section;
-  risk: { level: string };
+  hidden: number;
   known: string | null;
   policy: Policy;
   onReveal: (ids: string[]) => void;
@@ -456,8 +502,10 @@ function SectionHeading({
           shown — {known}
         </span>
       ) : (
-        risk.level !== "safe" && (
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600">{risk.level}</span>
+        hidden > 0 && (
+          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-zinc-600">
+            {hidden} withheld
+          </span>
         )
       )}
     </h3>
@@ -485,5 +533,3 @@ function groupSentences(paragraph: Paragraph, section: Section, policy: Policy):
   }
   return runs;
 }
-
-/** A section the agent has read can still be one the reader is not allowed to see the name of. */

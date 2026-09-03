@@ -32,6 +32,21 @@ There is no tool that hands over the ending by default. `ask_about_article` sear
 sentences you are allowed to see, so an answer built from it cannot contain a spoiler. The agent is
 not asked to keep a secret — it is never given one.
 
+## One dial, not three settings
+
+How much is withheld is a number from 0 to 100, on a slider. Every sentence is scored for how much
+of the ending it gives away, and a sentence is withheld when its score is above 100 minus that
+number. Three points on the scale are marked, because they are the ones worth a name: 0 withholds
+nothing at all, 50 withholds plot summaries and the sentences that state a reveal outright, 75
+withholds wording that merely hints at the ending as well.
+
+The scoring is what makes the dial worth turning. A plot summary runs in the order the story does,
+so a sentence is scored by how far into the section it sits — the opening scene is the safest thing
+in it and the last sentence is the ending. Lowering the slider therefore opens a plot from its
+beginning, one sentence at a time, instead of unmasking it at random. Your agent reads the same
+numbers back from `describe_withheld_content`, so it can tell you how far to lower the slider for
+the part you asked about without telling you what is in it.
+
 Headings are withheld too, when the heading is the spoiler: `Series finale` comes back to the agent
 as `null` with a reason, not as text. A summary of a section it cannot name cannot leak the name. The
 reason never repeats the heading either, so nothing the page says about what it is hiding hands the
@@ -47,10 +62,10 @@ Consent is a state you can see, not a promise in a prompt.
 | Tool | What it does |
 | --- | --- |
 | `open_article` | Open a Wikipedia article by title, in English or Japanese |
-| `get_article_outline` | Sections, risk level, how many sentences are visible and withheld. No article text |
+| `get_article_outline` | Sections, risk level, how many sentences are visible and withheld, at what sensitivity. No article text |
 | `get_visible_section_text` | One section with withheld sentences replaced by placeholders |
-| `describe_withheld_content` | What is withheld and why — ids, reasons, lengths, never the text |
-| `set_spoiler_policy` | How much this reader wants to see, plus what they already know. `strict` withholds narrative sections and every hint at the ending, `balanced` withholds narrative sections and sentences that state a reveal outright, `open` withholds nothing |
+| `describe_withheld_content` | What is withheld and why — ids, reasons, lengths, scores, never the text |
+| `set_spoiler_policy` | How much this reader wants to see, as a sensitivity from 0 to 100, plus what they already know. 0 withholds nothing, 50 withholds plot summaries and outright reveals, 75 withholds hints at the ending as well |
 | `mark_sections_known` | Unhide sections this reader has already lived through, with the reason shown |
 | `withhold_article_content` | Withhold what the page's wording rules missed — the agent's judgement, the page's enforcement |
 | `reveal_withheld_sentences` | Reveal specific sentences, when the reader asks for them |
