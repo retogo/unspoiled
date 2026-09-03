@@ -662,7 +662,7 @@ function SectionView({
     (total, group) => total + group.reduce((count, run) => count + (run.hidden ? run.sentences.length : 0), 0),
     0,
   );
-  const allHidden = groups.every((group) => group.every((run) => run.hidden));
+  const withheld = groups.filter((group) => group.every((run) => run.hidden)).length;
   const opened = section.paragraphs.flatMap((paragraph) =>
     paragraph.sentences.filter((sentence) => policy.revealed.has(sentence.id)).map((sentence) => sentence.id),
   );
@@ -681,70 +681,80 @@ function SectionView({
     />
   );
 
-  if (allHidden) {
-    return (
-      <section className="mt-6">
-        {heading}
-        <p className="unspoiled-mask mt-2 text-xs text-muted">
-          {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
-          open only as far as you have watched.
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {section.paragraphs.map((paragraph) => {
-            const chars = paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0);
-            const held = `${sentenceCount(paragraph.sentences.length)} withheld`;
-            return (
-              <button
-                key={paragraph.id}
-                onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
-                aria-label={`Reveal ${held}, ${chars} chars`}
-                style={{ minHeight: `${maskRows(chars, lang) * MASK_ROW_REM}rem` }}
-                className="unspoiled-mask flex w-full items-start rounded bg-mask px-2 py-1 text-left text-xs text-mask-ink hover:bg-mask-hover"
-              >
-                {held} · {chars} chars · reveal
-              </button>
-            );
-          })}
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section className="mt-6">
       {heading}
-      {section.paragraphs.map((paragraph, index) => (
-        <p key={paragraph.id} className="mt-3 leading-7">
-          {/*
-            * One flat list keyed by sentence rather than by run, so hiding a sentence leaves the ones
-            * around it mounted where they are instead of arriving all over again.
-            */}
-          {groups[index].flatMap((run) =>
-            run.hidden
-              ? [
-                  <button
-                    key={run.key}
-                    onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
-                    title={run.reason}
-                    className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
-                  >
-                    {sentenceCount(run.sentences.length)} withheld · reveal
-                  </button>,
-                ]
-              : run.sentences.map((sentence) => (
-                  <SentenceView
-                    key={sentence.id}
-                    sentence={sentence}
-                    lang={lang}
-                    start={flowing.get(sentence.id)}
-                    onHide={policy.revealed.has(sentence.id) ? onHide : null}
-                    onOpen={onOpen}
-                  />
-                )),
-          )}
+      {withheld > 0 && (
+        <p className="unspoiled-mask mt-2 text-xs text-muted">
+          {withheld} of {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in
+          order, so you can open only as far as you have watched.
         </p>
-      ))}
+      )}
+      {/*
+        * A paragraph keeps its own shape whatever the rest of the section is doing: withheld whole, it
+        * is a band; opened, it is prose. Both sit in the same list under the same margin, so opening
+        * one moves nothing but itself.
+        */}
+      {section.paragraphs.map((paragraph, index) =>
+        groups[index].every((run) => run.hidden) ? (
+          <WithheldParagraph key={paragraph.id} paragraph={paragraph} lang={lang} onReveal={onReveal} />
+        ) : (
+          <p key={paragraph.id} className="mt-3 leading-7">
+            {/*
+              * One flat list keyed by sentence rather than by run, so hiding a sentence leaves the ones
+              * around it mounted where they are instead of arriving all over again.
+              */}
+            {groups[index].flatMap((run) =>
+              run.hidden
+                ? [
+                    <button
+                      key={run.key}
+                      onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
+                      title={run.reason}
+                      className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
+                    >
+                      {sentenceCount(run.sentences.length)} withheld · reveal
+                    </button>,
+                  ]
+                : run.sentences.map((sentence) => (
+                    <SentenceView
+                      key={sentence.id}
+                      sentence={sentence}
+                      lang={lang}
+                      start={flowing.get(sentence.id)}
+                      onHide={policy.revealed.has(sentence.id) ? onHide : null}
+                      onOpen={onOpen}
+                    />
+                  )),
+            )}
+          </p>
+        ),
+      )}
     </section>
+  );
+}
+
+/** A paragraph withheld whole: a band of fill standing where its lines would be. */
+function WithheldParagraph({
+  paragraph,
+  lang,
+  onReveal,
+}: {
+  paragraph: Paragraph;
+  lang: Lang;
+  onReveal: (sentenceIds: string[]) => void;
+}) {
+  const chars = paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0);
+  const held = `${sentenceCount(paragraph.sentences.length)} withheld`;
+  return (
+    <button
+      onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
+      aria-label={`Reveal ${held}, ${chars} chars`}
+      style={{ minHeight: `${maskRows(chars, lang) * MASK_ROW_REM}rem` }}
+      className="unspoiled-mask mt-3 flex w-full items-start rounded bg-mask px-2 py-1 text-left text-xs text-mask-ink hover:bg-mask-hover"
+    >
+      {held} · {chars} chars · reveal
+    </button>
   );
 }
 

@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { maskRows } from "./lib/mask";
@@ -39,6 +40,14 @@ async function openArticle() {
 
 function placeholders(): HTMLElement[] {
   return screen.getAllByText(/chars · reveal$/);
+}
+
+function note(): string | null {
+  return screen.queryByText(/paragraphs withheld —/)?.textContent ?? null;
+}
+
+async function openFirstParagraph() {
+  await userEvent.click(placeholders()[0]);
 }
 
 beforeEach(() => {
@@ -92,5 +101,49 @@ describe("the placeholder standing in for a withheld paragraph", () => {
       `Reveal 1 sentence withheld, ${ONE_LINE.length} chars`,
       `Reveal 6 sentences withheld, ${MANY_LINES.join("").length} chars`,
     ]);
+  });
+});
+
+describe("a section the reader has opened part of", () => {
+  it("keeps a still-withheld paragraph as the same band, not a chip inside a line of prose", async () => {
+    await openArticle();
+
+    await openFirstParagraph();
+
+    const [remaining] = placeholders();
+    expect(remaining.textContent).toBe(`6 sentences withheld · ${MANY_LINES.join("").length} chars · reveal`);
+    expect(remaining.className).toContain("bg-mask");
+    expect(remaining.style.minHeight).toBe(`${maskRows(MANY_LINES.join("").length, "en") * 1.75}rem`);
+  });
+
+  it("leaves the paragraphs the reader did not open exactly where they were", async () => {
+    await openArticle();
+    const before = placeholders()[1];
+    const shape = { className: before.className, minHeight: before.style.minHeight };
+
+    await openFirstParagraph();
+
+    const after = placeholders()[0];
+    expect({ className: after.className, minHeight: after.style.minHeight }).toEqual(shape);
+    expect(after).toBe(before);
+  });
+
+  it("keeps the note above the section, counting down as the reader opens paragraphs", async () => {
+    await openArticle();
+    expect(note()).toContain("2 of 2 paragraphs withheld");
+
+    await openFirstParagraph();
+
+    expect(note()).toContain("1 of 2 paragraphs withheld");
+  });
+
+  it("drops the note once nothing in the section is withheld any more", async () => {
+    await openArticle();
+
+    await openFirstParagraph();
+    await openFirstParagraph();
+
+    expect(screen.queryAllByText(/chars · reveal$/)).toEqual([]);
+    expect(note()).toBeNull();
   });
 });

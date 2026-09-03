@@ -77,8 +77,13 @@ function isAscending(delays: number[]): boolean {
   return delays.every((delay, index) => index === 0 || delay > delays[index - 1]);
 }
 
+/** The paragraphs still withheld whole, in the order they stand on the page. */
+function bands(): HTMLElement[] {
+  return screen.getAllByRole("button", { name: /^Reveal .* chars$/ });
+}
+
 async function revealParagraph(which: number) {
-  await userEvent.click(screen.getAllByRole("button", { name: /^Reveal .* chars$/ })[which - 1]);
+  await userEvent.click(bands()[which - 1]);
 }
 
 beforeEach(() => {
@@ -204,7 +209,7 @@ describe("hiding an opened sentence again", () => {
   it("leaves the sentences open in another paragraph untouched", async () => {
     await openArticle();
     await revealParagraph(1);
-    await userEvent.click(screen.getByRole("button", { name: "1 sentence withheld · reveal" }));
+    await revealParagraph(1);
     const elsewhere = openedSentences()[2];
 
     await userEvent.click(openedSentences()[0]);
@@ -215,13 +220,12 @@ describe("hiding an opened sentence again", () => {
   it("leaves the placeholders already on the page where they are", async () => {
     await openArticle();
     await revealParagraph(1);
-    const standing = screen.getByRole("button", { name: "1 sentence withheld · reveal" });
+    const standing = bands()[0];
 
     await userEvent.click(openedSentences()[0]);
 
-    const chips = screen.getAllByRole("button", { name: "1 sentence withheld · reveal" });
-    expect(chips).toHaveLength(2);
-    expect(chips).toContain(standing);
+    expect(screen.getByRole("button", { name: "1 sentence withheld · reveal" })).toBeTruthy();
+    expect(bands()[0]).toBe(standing);
   });
 
   it("leaves the sentences of a section alone when its heading is taken back", async () => {
