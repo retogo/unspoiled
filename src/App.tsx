@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { flowDelay, flowRuns, flowTimings, flowWords, type FlowTiming } from "./lib/flow";
+import { bottomOverlap, scrollToFollow } from "./lib/scroll";
 import { maskRows } from "./lib/mask";
 import {
   assessSection,
@@ -89,6 +90,19 @@ function runsById(article: Article | null): Map<string, Run[]> {
     }
   }
   return runs;
+}
+
+/** Scrolling the page from the keyboard is the reader taking it back, the same as reaching for it. */
+const SCROLL_KEYS = ["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "];
+
+/**
+ * How much of the foot of the window the policy panel is sitting over. Below `lg` it is pinned
+ * across the bottom of the screen; wider than that it is part of the sidebar and covers nothing.
+ */
+function bottomInset(): number {
+  const panel = document.getElementById("sensitivity")?.closest("div");
+  if (!panel) return 0;
+  return bottomOverlap(panel.getBoundingClientRect(), window.innerHeight);
 }
 
 function sentenceCount(sentences: number): string {
@@ -260,6 +274,38 @@ export default function App() {
    * another, each waiting only as long as the sentence in front of it actually runs. The slider can
    * open hundreds at once and never touches `revealed`, so those keep the plain fade.
    */
+  /**
+   * A reveal that runs past the foot of the window carries the page down with it, so the reader
+   * watches the words arrive rather than guessing where they went. The moment they scroll for
+   * themselves the page is theirs again, until the next reveal asks for it.
+   */
+  const followRef = useRef(false);
+  useEffect(() => {
+    const follow = (event: Event) => {
+      if (!followRef.current) return;
+      const word = event.target;
+      if (!(word instanceof HTMLElement) || !word.classList.contains("unspoiled-flow")) return;
+      const by = scrollToFollow(word.getBoundingClientRect().bottom, window.innerHeight, bottomInset());
+      if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+    };
+    const release = () => {
+      followRef.current = false;
+    };
+    const releaseOnKey = (event: KeyboardEvent) => {
+      if (SCROLL_KEYS.includes(event.key)) release();
+    };
+    document.addEventListener("animationstart", follow);
+    window.addEventListener("wheel", release, { passive: true });
+    window.addEventListener("touchmove", release, { passive: true });
+    window.addEventListener("keydown", releaseOnKey);
+    return () => {
+      document.removeEventListener("animationstart", follow);
+      window.removeEventListener("wheel", release);
+      window.removeEventListener("touchmove", release);
+      window.removeEventListener("keydown", releaseOnKey);
+    };
+  }, []);
+
   const revealedBefore = useRef(policy.revealed);
   useEffect(() => {
     const before = revealedBefore.current;
@@ -267,6 +313,7 @@ export default function App() {
     const opened = [...policy.revealed].filter((id) => !before.has(id));
     const closed = [...before].filter((id) => !policy.revealed.has(id));
     if (opened.length === 0 && closed.length === 0) return;
+    followRef.current = opened.length > 0;
     const article = articleRef.current;
     const runs = runsById(article);
     const lang = article?.lang ?? "en";
