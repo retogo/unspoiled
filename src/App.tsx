@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
 import { flowDelay, flowRuns, flowTimings, flowWords, type FlowTiming } from "./lib/flow";
 import { bottomOverlap, scrollToFollow } from "./lib/scroll";
 import { maskRows } from "./lib/mask";
@@ -42,7 +51,8 @@ import {
 } from "./lib/theme";
 import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
-import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
+import { fetchArticle, type Lang } from "./lib/wikipedia";
+import { useSuggestions } from "./useSuggestions";
 
 const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
   { lang: "en", title: "The Sixth Sense", note: "the lead paragraph already gives it away" },
@@ -61,6 +71,12 @@ const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[
   { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
   { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
   { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
+];
+
+/** Which Wikipedia to search. The pair sits inside the field: a search is a term and an edition. */
+const LANGUAGES: { lang: Lang; label: string; title: string }[] = [
+  { lang: "en", label: "EN", title: "Search the English Wikipedia" },
+  { lang: "ja", label: "JA", title: "Search the Japanese Wikipedia" },
 ];
 
 const THEMES: { choice: ThemeChoice; label: string }[] = [
@@ -118,8 +134,6 @@ export default function App() {
     readSessionStart(window.location.search, window.localStorage.getItem(SENSITIVITY_KEY)),
   );
   const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
-  const [term, setTerm] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
   const [article, setArticle] = useState<Article | null>(null);
   const [policy, setPolicy] = useState<Policy>(start.policy);
   const [loading, setLoading] = useState(false);
@@ -144,7 +158,6 @@ export default function App() {
     setLang(nextLang);
     setLoading(true);
     setError(null);
-    setHits([]);
     try {
       const fetched = await fetchArticle(nextLang, title);
       if (openRequestRef.current !== request) return { status: "superseded" };
@@ -216,19 +229,6 @@ export default function App() {
     window.localStorage.setItem(THEME_KEY, choice);
     setTheme(choice);
   }, []);
-
-  const search = useCallback(async () => {
-    if (term.trim().length === 0) return;
-    setLoading(true);
-    setError(null);
-    try {
-      setHits(await searchArticles(lang, term));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setLoading(false);
-    }
-  }, [lang, term]);
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
 
@@ -501,31 +501,7 @@ export default function App() {
         </aside>
 
         <div className="min-w-0">
-          <div className="flex flex-wrap gap-2">
-            <select
-              value={lang}
-              onChange={(event) => setLang(event.target.value as Lang)}
-              className="rounded-lg border border-edge bg-surface px-2 py-2 text-sm"
-            >
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-            </select>
-            <input
-              value={term}
-              onChange={(event) => setTerm(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.nativeEvent.isComposing) void search();
-              }}
-              placeholder="Search Wikipedia for a film, series or novel"
-              className="min-w-0 flex-1 basis-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm sm:basis-auto"
-            />
-            <button
-              onClick={() => void search()}
-              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-inverse"
-            >
-              Search
-            </button>
-          </div>
+          <SearchBox lang={lang} onLang={setLang} onOpen={(title) => void openArticle(lang, title)} />
 
           {!article && (
             <div className="mt-4 flex flex-wrap gap-2">
@@ -544,22 +520,6 @@ export default function App() {
 
           {loading && <p className="mt-6 text-sm text-muted">Loading…</p>}
           {error && <p className="mt-6 text-sm text-alert-text">{error}</p>}
-
-          {hits.length > 0 && (
-            <ul className="mt-4 divide-y divide-line rounded-lg border border-line bg-surface">
-              {hits.map((hit) => (
-                <li key={hit.title}>
-                  <button
-                    onClick={() => void openArticle(lang, hit.title)}
-                    className="block w-full px-4 py-3 text-left hover:bg-row-hover"
-                  >
-                    <span className="text-sm font-medium">{hit.title}</span>
-                    <span className="block text-xs text-muted">{hit.snippet}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
 
           {article && (
             <article className="mt-6">
@@ -679,6 +639,142 @@ function Ledger({
         </ul>
       )}
     </section>
+  );
+}
+
+const SUGGESTIONS_ID = "search-suggestions";
+
+const optionId = (index: number) => `search-suggestion-${index}`;
+
+/**
+ * One field does the whole job. The reader types, the page searches, and what it finds drops under
+ * the box: there is no button to press, and the edition to look in is the only other control, small
+ * and inside the field. Enter opens the row the box is offering, so the shortest path from a term to
+ * an article is to type it and press Enter.
+ */
+function SearchBox({
+  lang,
+  onLang,
+  onOpen,
+}: {
+  lang: Lang;
+  onLang: (lang: Lang) => void;
+  onOpen: (title: string) => void;
+}) {
+  const [term, setTerm] = useState("");
+  const [composing, setComposing] = useState(false);
+  const { hits, active, error, move, searchNow, clear } = useSuggestions(lang, term, composing);
+
+  const open = (title: string) => {
+    clear();
+    onOpen(title);
+  };
+
+  const steer = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Enter") {
+      const chosen = hits[active];
+      if (chosen) open(chosen.title);
+      else searchNow();
+    } else if (event.key === "Escape") {
+      clear();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (hits.length === 0) return;
+      event.preventDefault();
+      move(event.key === "ArrowDown" ? 1 : -1);
+    }
+  };
+
+  return (
+    <div
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) clear();
+      }}
+    >
+      <div className="flex items-center gap-2 rounded-lg border border-edge bg-surface py-1 pr-1 pl-3 focus-within:border-edge-hover">
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          aria-hidden="true"
+          className="size-4 shrink-0 text-faint"
+        >
+          <circle cx="9" cy="9" r="5.25" />
+          <path d="M13 13 17 17" strokeLinecap="round" />
+        </svg>
+        <input
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
+          onKeyDown={steer}
+          placeholder="Search Wikipedia for a film, series or novel"
+          role="combobox"
+          aria-expanded={hits.length > 0}
+          aria-controls={hits.length > 0 ? SUGGESTIONS_ID : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={active < 0 ? undefined : optionId(active)}
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
+        />
+        <div
+          role="group"
+          aria-label="Search language"
+          className="flex shrink-0 gap-0.5 rounded-full bg-raised p-0.5"
+        >
+          {/* Switching edition keeps the caret where it was, so the reader carries on typing. */}
+          {LANGUAGES.map((option) => (
+            <button
+              key={option.lang}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onLang(option.lang)}
+              aria-pressed={lang === option.lang}
+              title={option.title}
+              className={`rounded-full px-2 py-1 text-xs font-medium ${
+                lang === option.lang ? "bg-ink text-inverse" : "text-muted hover:text-ink"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error && (
+        <p className="absolute inset-x-0 top-full z-20 mt-1 rounded-lg border border-alert-line bg-alert-surface px-4 py-3 text-xs text-alert-ink">
+          {error}
+        </p>
+      )}
+      {hits.length > 0 && (
+        <ul
+          id={SUGGESTIONS_ID}
+          role="listbox"
+          aria-label="Suggested articles"
+          className="absolute inset-x-0 top-full z-20 mt-1 max-h-[min(60vh,24rem)] divide-y divide-line overflow-y-auto rounded-lg border border-line bg-surface shadow-lg"
+        >
+          {/*
+            * The row is the option itself rather than a button inside one: the list is driven from the
+            * field, so a pointer needs somewhere to click and a screen reader needs the row to be the
+            * thing that is selected. Holding the mouse down keeps the field focused, so the list is
+            * still there when the click lands.
+            */}
+          {hits.map((hit, index) => (
+            <li
+              key={hit.title}
+              id={optionId(index)}
+              role="option"
+              aria-selected={index === active}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => open(hit.title)}
+              className={`cursor-pointer px-4 py-2.5 ${index === active ? "bg-raised" : "hover:bg-row-hover"}`}
+            >
+              <span className="block truncate text-sm font-medium">{hit.title}</span>
+              <span className="block truncate text-xs text-muted">{hit.snippet}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
