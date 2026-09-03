@@ -1,12 +1,67 @@
 @import "tailwindcss";
 
+/*
+ * Every colour is named for the job it does rather than the shade it happens to be, so a theme is a
+ * set of values for these names and the markup says the same thing in both.
+ */
 @theme {
-  --color-ink: #18181b;
   --color-paper: #fbfbfa;
+  --color-ink: #18181b;
+  --color-inverse: #ffffff;
+  --color-surface: #ffffff;
+  --color-raised: #f4f4f5;
+  --color-row-hover: #fafafa;
+  --color-muted: #71717a;
+  --color-faint: #a1a1aa;
+  --color-line: #e4e4e7;
+  --color-edge: #d4d4d8;
+  --color-edge-hover: #a1a1aa;
+  --color-mask: #e4e4e7;
+  --color-mask-hover: #d4d4d8;
+  --color-mask-ink: #52525b;
+  --color-ok-surface: #ecfdf5;
+  --color-ok-ink: #047857;
+  --color-warn-surface: #fffbeb;
+  --color-warn-badge: #fef3c7;
+  --color-warn-ink: #78350f;
+  --color-alert-surface: #fef2f2;
+  --color-alert-ink: #7f1d1d;
+  --color-alert-text: #b91c1c;
 }
 
 html {
   color-scheme: light;
+}
+
+/*
+ * Set before the first paint by the script in index.html, then kept in step by the page. The values
+ * are unlayered, so they win over the light ones Tailwind emits into its theme layer.
+ */
+html[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-paper: #18181b;
+  --color-ink: #f4f4f5;
+  --color-inverse: #18181b;
+  --color-surface: #27272a;
+  --color-raised: #3f3f46;
+  --color-row-hover: #323238;
+  --color-muted: #a1a1aa;
+  --color-faint: #909099;
+  --color-line: #3f3f46;
+  --color-edge: #52525b;
+  --color-edge-hover: #71717a;
+  --color-mask: #3f3f46;
+  --color-mask-hover: #52525b;
+  --color-mask-ink: #d4d4d8;
+  --color-ok-surface: #064e3b;
+  --color-ok-ink: #6ee7b7;
+  --color-warn-surface: #451a03;
+  --color-warn-badge: #78350f;
+  --color-warn-ink: #fde68a;
+  --color-alert-surface: #450a0a;
+  --color-alert-ink: #fecaca;
+  --color-alert-text: #fca5a5;
 }
 
 /*
@@ -73,7 +128,7 @@ input[type="range"].sensitivity::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
     var(--color-ink) var(--sensitivity-fill),
-    #e4e4e7 var(--sensitivity-fill)
+    var(--color-line) var(--sensitivity-fill)
   );
 }
 
@@ -83,7 +138,7 @@ input[type="range"].sensitivity::-moz-range-track {
   background: linear-gradient(
     to right,
     var(--color-ink) var(--sensitivity-fill),
-    #e4e4e7 var(--sensitivity-fill)
+    var(--color-line) var(--sensitivity-fill)
   );
 }
 
@@ -94,7 +149,7 @@ input[type="range"].sensitivity::-webkit-slider-thumb {
   margin-top: -5.5px;
   border: 2px solid var(--color-ink);
   border-radius: 999px;
-  background: #fff;
+  background: var(--color-surface);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 
@@ -103,6 +158,6 @@ input[type="range"].sensitivity::-moz-range-thumb {
   height: 15px;
   border: 2px solid var(--color-ink);
   border-radius: 999px;
-  background: #fff;
+  background: var(--color-surface);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
