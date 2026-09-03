@@ -106,3 +106,24 @@ input[type="range"].sensitivity::-moz-range-thumb {
   background: #fff;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
+
+/*
+ * A sidebar panel folds away below `lg`, where the sidebar sits above the article and its own
+ * heading would only repeat the summary. From `lg` up the panel is a plain section: the summary
+ * steps aside and the fold is held open.
+ */
+@media (width < 64rem) {
+  .panel h3 {
+    display: none;
+  }
+}
+
+@media (width >= 64rem) {
+  .panel > summary {
+    display: none;
+  }
+
+  .panel::details-content {
+    content-visibility: visible;
+  }
+}

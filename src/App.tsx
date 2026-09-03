@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   assessSection,
   countHidden,
@@ -54,6 +54,10 @@ function sensitivityHint(sensitivity: number): string {
 
 function sentenceCount(sentences: number): string {
   return sentences === 1 ? "1 sentence" : `${sentences} sentences`;
+}
+
+function sentenceTotal(rows: { sentences: number }[]): number {
+  return rows.reduce((total, row) => total + row.sentences, 0);
 }
 
 export default function App() {
@@ -175,6 +179,10 @@ export default function App() {
 
   const sentFromElsewhere = useMemo(() => sentElsewhere(scanned, article), [article, scanned]);
 
+  const openedCount = sentenceTotal(openedOnPage);
+
+  const sentCount = sentenceTotal(sentToTheAgent) + sentenceTotal(sentFromElsewhere);
+
   /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
   const chooseSensitivity = useCallback((sensitivity: number) => {
     window.localStorage.setItem(SENSITIVITY_KEY, String(sensitivity));
@@ -185,7 +193,7 @@ export default function App() {
     setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
+    <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-4">
           <h1 className="text-xl font-semibold tracking-tight">Unspoiled</h1>
@@ -209,6 +217,141 @@ export default function App() {
       </header>
 
       <main className="mx-auto grid max-w-5xl gap-6 px-5 py-6 lg:grid-cols-[1fr_18rem]">
+        <aside className="space-y-5 text-sm lg:order-last lg:sticky lg:top-6 lg:self-start">
+          <section>
+            <h3 className="font-semibold max-lg:sr-only">Your policy</h3>
+            {/*
+              Below `lg` the sidebar sits above the article, which the reader then scrolls past, so
+              the one control they keep reaching for is pinned to the bottom of the screen instead.
+              It stays the same slider: the presets and the hint are what step aside to fit.
+            */}
+            <div className="fixed inset-x-0 bottom-0 z-10 border-t border-zinc-200 bg-white px-5 pt-1.5 pb-2 lg:static lg:mt-2 lg:rounded-lg lg:border-x lg:border-b lg:px-3 lg:pt-2.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                <label htmlFor="sensitivity" className="font-medium tabular-nums">
+                  Sensitivity {policy.sensitivity}
+                </label>
+                {counts && (
+                  <span className="text-xs tabular-nums text-zinc-500">
+                    {counts.hidden} of {counts.total} sentences withheld
+                  </span>
+                )}
+              </div>
+              <input
+                id="sensitivity"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={policy.sensitivity}
+                onChange={(event) => chooseSensitivity(Number(event.target.value))}
+                style={{ "--sensitivity-fill": `${policy.sensitivity}%` } as CSSProperties}
+                className="sensitivity mt-2.5 w-full"
+              />
+              <div className="relative mt-0.5 mb-1 hidden h-8 lg:block">
+                {SENSITIVITY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => chooseSensitivity(preset.sensitivity)}
+                    title={preset.hint}
+                    style={{ left: `${preset.sensitivity}%` }}
+                    className={`absolute top-0 flex flex-col items-center gap-1 text-[11px] ${
+                      preset.sensitivity === 0 ? "" : "-translate-x-1/2"
+                    } ${
+                      policy.sensitivity === preset.sensitivity
+                        ? "font-medium text-ink"
+                        : "text-zinc-500 hover:text-ink"
+                    }`}
+                  >
+                    <span className="h-1.5 w-px bg-zinc-300" />
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <p className="hidden text-xs leading-5 text-zinc-500 lg:block">{sensitivityHint(policy.sensitivity)}</p>
+            </div>
+            {policy.alreadyKnows.length > 0 && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <p className="font-medium">Your agent says you already know</p>
+                <ul className="mt-1 list-inside list-disc">
+                  {policy.alreadyKnows.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => setPolicy((current) => ({ ...current, alreadyKnows: [] }))}
+                  className="mt-1 underline"
+                >
+                  That is wrong — clear it
+                </button>
+              </div>
+            )}
+            {policy.notes && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Your agent said: {policy.notes}
+              </p>
+            )}
+          </section>
+
+          {scanned.length > 0 && (
+            <section>
+              <h3 className="font-semibold">Your agent has read</h3>
+              {scannedHeadings.length > 0 && (
+                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                  {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
+                </p>
+              )}
+              {elsewhere.length > 0 && (
+                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
+                  {elsewhere.map((group) => (
+                    <li key={group.articleTitle}>
+                      {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+            <Panel title="Revealed on your page" count={openedCount}>
+              <Ledger
+                title="Revealed on your page"
+                rows={openedOnPage}
+                className="border border-zinc-200 bg-white text-zinc-600"
+              />
+            </Panel>
+            <Panel title="Text sent to your agent" count={sentCount}>
+              <Ledger
+                title="Text sent to your agent"
+                rows={sentToTheAgent}
+                elsewhere={sentFromElsewhere}
+                className="border border-red-100 bg-red-50 text-red-900"
+              />
+            </Panel>
+          </div>
+
+          <Panel title="Tool activity" count={calls.length}>
+            <section>
+              <h3 className="font-semibold">Tool activity</h3>
+              {calls.length === 0 ? (
+                <p className="mt-1 text-xs text-zinc-500">Nothing yet. Ask your agent to filter this page.</p>
+              ) : (
+                <ul className="mt-1 space-y-1 text-xs">
+                  {calls.map((call) => (
+                    <li key={`${call.at}-${call.tool}`} className="rounded bg-white px-2 py-1">
+                      <code className="font-medium">{call.tool}</code>
+                      {!call.ok && <span className="ml-1 font-medium text-red-700">error</span>}
+                      <span className={`block ${call.ok ? "text-zinc-500" : "text-red-700"}`}>
+                        {call.input} → {call.summary}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </Panel>
+        </aside>
+
         <div className="min-w-0">
           <div className="flex flex-wrap gap-2">
             <select
@@ -285,130 +428,6 @@ export default function App() {
             </article>
           )}
         </div>
-
-        <aside className="space-y-5 text-sm lg:sticky lg:top-6 lg:self-start">
-          <section>
-            <h3 className="font-semibold">Your policy</h3>
-            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 pt-2.5 pb-2">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-                <label htmlFor="sensitivity" className="font-medium tabular-nums">
-                  Sensitivity {policy.sensitivity}
-                </label>
-                {counts && (
-                  <span className="text-xs tabular-nums text-zinc-500">
-                    {counts.hidden} of {counts.total} sentences withheld
-                  </span>
-                )}
-              </div>
-              <input
-                id="sensitivity"
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={policy.sensitivity}
-                onChange={(event) => chooseSensitivity(Number(event.target.value))}
-                style={{ "--sensitivity-fill": `${policy.sensitivity}%` } as CSSProperties}
-                className="sensitivity mt-2.5 w-full"
-              />
-              <div className="relative mt-0.5 mb-1 h-8">
-                {SENSITIVITY_PRESETS.map((preset) => (
-                  <button
-                    key={preset.label}
-                    onClick={() => chooseSensitivity(preset.sensitivity)}
-                    title={preset.hint}
-                    style={{ left: `${preset.sensitivity}%` }}
-                    className={`absolute top-0 flex flex-col items-center gap-1 text-[11px] ${
-                      preset.sensitivity === 0 ? "" : "-translate-x-1/2"
-                    } ${
-                      policy.sensitivity === preset.sensitivity
-                        ? "font-medium text-ink"
-                        : "text-zinc-500 hover:text-ink"
-                    }`}
-                  >
-                    <span className="h-1.5 w-px bg-zinc-300" />
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs leading-5 text-zinc-500">{sensitivityHint(policy.sensitivity)}</p>
-            </div>
-            {policy.alreadyKnows.length > 0 && (
-              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                <p className="font-medium">Your agent says you already know</p>
-                <ul className="mt-1 list-inside list-disc">
-                  {policy.alreadyKnows.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-                <button
-                  onClick={() => setPolicy((current) => ({ ...current, alreadyKnows: [] }))}
-                  className="mt-1 underline"
-                >
-                  That is wrong — clear it
-                </button>
-              </div>
-            )}
-            {policy.notes && (
-              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                Your agent said: {policy.notes}
-              </p>
-            )}
-          </section>
-
-          {scanned.length > 0 && (
-            <section>
-              <h3 className="font-semibold">Your agent has read</h3>
-              {scannedHeadings.length > 0 && (
-                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
-                  {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
-                </p>
-              )}
-              {elsewhere.length > 0 && (
-                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
-                  {elsewhere.map((group) => (
-                    <li key={group.articleTitle}>
-                      {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-            <Ledger
-              title="Revealed on your page"
-              rows={openedOnPage}
-              className="border border-zinc-200 bg-white text-zinc-600"
-            />
-            <Ledger
-              title="Text sent to your agent"
-              rows={sentToTheAgent}
-              elsewhere={sentFromElsewhere}
-              className="border border-red-100 bg-red-50 text-red-900"
-            />
-          </div>
-
-          <section>
-            <h3 className="font-semibold">Tool activity</h3>
-            {calls.length === 0 ? (
-              <p className="mt-1 text-xs text-zinc-500">Nothing yet. Ask your agent to filter this page.</p>
-            ) : (
-              <ul className="mt-1 space-y-1 text-xs">
-                {calls.map((call) => (
-                  <li key={`${call.at}-${call.tool}`} className="rounded bg-white px-2 py-1">
-                    <code className="font-medium">{call.tool}</code>
-                    {!call.ok && <span className="ml-1 font-medium text-red-700">error</span>}
-                    <span className={`block ${call.ok ? "text-zinc-500" : "text-red-700"}`}>
-                      {call.input} → {call.summary}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </aside>
       </main>
 
       <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-zinc-500">
@@ -430,6 +449,22 @@ function ledgerRows(disclosures: SectionDisclosure[], policy: Policy): LedgerRow
     label: hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section),
     sentences: ids.length,
   }));
+}
+
+/**
+ * Below `lg` the sidebar sits above the article, so each panel folds away and its summary carries
+ * the count: a folded panel still says how much it holds. From `lg` up the summary steps aside and
+ * the fold is held open in CSS, leaving a plain section in the right column.
+ */
+function Panel({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+  return (
+    <details className="panel">
+      <summary className="cursor-pointer rounded-lg border border-zinc-200 bg-white px-3 py-2 font-semibold">
+        {title} · {count}
+      </summary>
+      {children}
+    </details>
+  );
 }
 
 /**
