@@ -130,13 +130,21 @@ export default function App() {
   const [flowing, setFlowing] = useState<ReadonlyMap<string, FlowTiming>>(new Map());
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
 
+  /*
+   * The tools are handed to the browser once, on mount, and are called long afterwards, so they read
+   * the page through refs rather than through the render that registered them. The refs are caught
+   * up after each commit: a render that wrote to them would be a render with a side effect, which is
+   * both a lie about the render and enough to stop the compiler optimising anything here.
+   */
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
   const scannedRef = useRef<ScannedSection[]>(scanned);
   const openRequestRef = useRef(0);
-  articleRef.current = article;
-  policyRef.current = policy;
-  scannedRef.current = scanned;
+  useLayoutEffect(() => {
+    articleRef.current = article;
+    policyRef.current = policy;
+    scannedRef.current = scanned;
+  });
 
   const openArticle = useCallback(async (nextLang: Lang, title: string): Promise<OpenResult> => {
     const request = openRequestRef.current + 1;
@@ -163,9 +171,6 @@ export default function App() {
     }
   }, []);
 
-  const openArticleRef = useRef(openArticle);
-  openArticleRef.current = openArticle;
-
   useEffect(() => {
     const registration = registerTools(
       buildTools({
@@ -177,7 +182,7 @@ export default function App() {
           }
           setPolicy(next);
         },
-        openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
+        openArticle: (toolLang, title) => openArticle(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
         sent: () => sentToAgent(scannedRef.current, articleRef.current).flatMap((entry) => entry.ids),
         markScanned: (open, sectionId, sent) =>
@@ -187,11 +192,17 @@ export default function App() {
     );
     void registration.ready.then(setRegistration);
     return () => registration.unregister();
-  }, []);
+  }, [openArticle]);
 
+  /*
+   * Opening the article a shared link names is this page synchronising itself with the network, and
+   * the request it starts reports that it is loading. That is the one setState an effect should be
+   * allowed, and the rule cannot tell it apart from a cascade.
+   */
   useEffect(() => {
-    if (start.article) void openArticleRef.current(start.article.lang, start.article.title);
-  }, [start]);
+    // oxlint-disable-next-line react/set-state-in-effect
+    if (start.article) void openArticle(start.article.lang, start.article.title);
+  }, [openArticle, start]);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -996,10 +1007,13 @@ function FlowingText({
   onOpen: (title: string) => void;
 }) {
   const timed = useMemo(() => {
-    let index = 0;
-    return flowRuns(runs, lang).map((pieces) =>
-      pieces.map((piece) => ({ piece, delay: flowDelay(index++, timing) })),
-    );
+    const timedRuns = [];
+    let start = 0;
+    for (const pieces of flowRuns(runs, lang)) {
+      timedRuns.push(pieces.map((piece, index) => ({ piece, delay: flowDelay(start + index, timing) })));
+      start += pieces.length;
+    }
+    return timedRuns;
   }, [lang, runs, timing]);
 
   return (
