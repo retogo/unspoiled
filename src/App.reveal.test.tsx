@@ -11,6 +11,8 @@ const HTML = `<div class="mw-parser-output">
   <p>Malcolm understands that he has been a ghost since the opening scene.</p>
   <h2>Ending explained</h2>
   <p>Shyamalan has said in interviews that the film was written to reward a second viewing.</p>
+  <h2>Ending: the twist</h2>
+  <p>Malcolm realises the truth about himself in the final minutes of the film.</p>
 </div>`;
 
 vi.mock("./lib/wikipedia", () => ({
@@ -52,6 +54,15 @@ async function openArticle() {
 
 function articleText(): string {
   return screen.getByRole("article").textContent ?? "";
+}
+
+/** The sentences of the article the reader has opened, each with its control to close it again. */
+function openedSentences(): HTMLElement[] {
+  return [...screen.getByRole("article").querySelectorAll<HTMLElement>("p span.group")];
+}
+
+function delaysWithin(sentence: HTMLElement): string[] {
+  return [...sentence.querySelectorAll<HTMLElement>(".unspoiled-flow")].map((piece) => piece.style.animationDelay);
 }
 
 function flowing(): HTMLElement[] {
@@ -155,7 +166,7 @@ describe("hiding an opened sentence again", () => {
 
   it("takes back a heading the reader opened", async () => {
     await openArticle();
-    await userEvent.click(screen.getByRole("button", { name: "Heading withheld · reveal" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Heading withheld · reveal" })[0]);
     expect(document.body.textContent).toContain("Ending explained");
 
     await userEvent.click(screen.getByRole("button", { name: "Hide this heading again" }));
@@ -172,6 +183,56 @@ describe("hiding an opened sentence again", () => {
 
     await waitFor(() => expect(flowing().length).toBeGreaterThan(1));
     expect(flowDelays()[0]).toBe(0);
+  });
+
+  it("leaves a sentence that stays open exactly as it was, with no second arrival", async () => {
+    await openArticle();
+    await revealParagraph(1);
+    const opened = openedSentences();
+    expect(opened).toHaveLength(2);
+    const staying = opened[1];
+    const delays = delaysWithin(staying);
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+
+    expect(openedSentences()).toEqual([staying]);
+    expect(delaysWithin(staying)).toEqual(delays);
+  });
+
+  it("leaves the sentences open in another paragraph untouched", async () => {
+    await openArticle();
+    await revealParagraph(1);
+    await userEvent.click(screen.getByRole("button", { name: "1 sentence withheld · reveal" }));
+    const elsewhere = openedSentences()[2];
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+
+    expect(openedSentences()).toContain(elsewhere);
+  });
+
+  it("leaves the placeholders already on the page where they are", async () => {
+    await openArticle();
+    await revealParagraph(1);
+    const standing = screen.getByRole("button", { name: "1 sentence withheld · reveal" });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+
+    const chips = screen.getAllByRole("button", { name: "1 sentence withheld · reveal" });
+    expect(chips).toHaveLength(2);
+    expect(chips).toContain(standing);
+  });
+
+  it("leaves the sentences of a section alone when its heading is taken back", async () => {
+    await openArticle();
+    await revealParagraph(3);
+    await userEvent.click(screen.getAllByRole("button", { name: "Heading withheld · reveal" })[1]);
+    const sentence = openedSentences()[0];
+    const delays = delaysWithin(sentence);
+
+    await userEvent.click(screen.getByRole("button", { name: "Hide this heading again" }));
+
+    expect(openedSentences()).toEqual([sentence]);
+    expect(delaysWithin(sentence)).toEqual(delays);
   });
 
   it("is offered only for what the reader opened, not for what the slider shows", async () => {

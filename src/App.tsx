@@ -668,28 +668,31 @@ function SectionView({
       {heading}
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
-          {groups[index].map((run) =>
-            run.hidden ? (
-              <button
-                key={run.key}
-                onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
-                title={run.reason}
-                className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
-              >
-                {sentenceCount(run.sentences.length)} withheld · reveal
-              </button>
-            ) : (
-              /* One view per sentence, so only the sentences that just appeared animate in. */
-              run.sentences.map((sentence) => (
-                <SentenceView
-                  key={sentence.id}
-                  sentence={sentence}
-                  lang={lang}
-                  start={flowing.get(sentence.id)}
-                  onHide={policy.revealed.has(sentence.id) ? onHide : null}
-                />
-              ))
-            ),
+          {/*
+            * One flat list keyed by sentence rather than by run, so hiding a sentence leaves the ones
+            * around it mounted where they are instead of arriving all over again.
+            */}
+          {groups[index].flatMap((run) =>
+            run.hidden
+              ? [
+                  <button
+                    key={run.key}
+                    onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
+                    title={run.reason}
+                    className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
+                  >
+                    {sentenceCount(run.sentences.length)} withheld · reveal
+                  </button>,
+                ]
+              : run.sentences.map((sentence) => (
+                  <SentenceView
+                    key={sentence.id}
+                    sentence={sentence}
+                    lang={lang}
+                    start={flowing.get(sentence.id)}
+                    onHide={policy.revealed.has(sentence.id) ? onHide : null}
+                  />
+                )),
           )}
         </p>
       ))}
