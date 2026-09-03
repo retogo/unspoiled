@@ -1,16 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Article } from "./segment";
+import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
-import { articleKey, policyForOpened, readSessionStart, scannedElsewhere, scannedForArticle } from "./session";
+import {
+  articleKey,
+  policyForOpened,
+  readSessionStart,
+  recordScanned,
+  revealedOnPage,
+  scannedElsewhere,
+  scannedForArticle,
+  sentElsewhere,
+  sentToAgent,
+} from "./session";
 
-function article(lang: Lang, title: string): Article {
+function article(lang: Lang, title: string, sections: Section[] = []): Article {
   return {
     lang,
     title,
     displayTitle: title,
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${title}`,
-    sections: [],
+    sections,
+  };
+}
+
+function section(id: string, heading: string, sentenceIds: string[]): Section {
+  return {
+    id,
+    heading,
+    headingPath: [heading],
+    level: 2,
+    paragraphs: [{ id: `p${id}`, sentences: sentenceIds.map((sentenceId) => ({ id: sentenceId, text: sentenceId })) }],
   };
 }
 
@@ -103,9 +123,9 @@ describe("policyForOpened", () => {
 
 describe("scanned sections", () => {
   const scanned = [
-    { articleKey: articleKey("en", "Attack on Titan"), articleTitle: "Attack on Titan", sectionId: "s2" },
-    { articleKey: articleKey("en", "The Sixth Sense"), articleTitle: "The Sixth Sense", sectionId: "s1" },
-    { articleKey: articleKey("ja", "シックス・センス"), articleTitle: "シックス・センス", sectionId: "s1" },
+    { articleKey: articleKey("en", "Attack on Titan"), articleTitle: "Attack on Titan", sectionId: "s2", sent: ["p2.0"] },
+    { articleKey: articleKey("en", "The Sixth Sense"), articleTitle: "The Sixth Sense", sectionId: "s1", sent: ["p1.0"] },
+    { articleKey: articleKey("ja", "シックス・センス"), articleTitle: "シックス・センス", sectionId: "s1", sent: ["p1.0"] },
   ];
 
   it("reports only the sections read in the article that is open", () => {
@@ -121,5 +141,62 @@ describe("scanned sections", () => {
       { articleTitle: "Attack on Titan", sections: 1 },
       { articleTitle: "シックス・センス", sections: 1 },
     ]);
+  });
+});
+
+describe("the disclosure ledgers", () => {
+  const open = article("en", "Attack on Titan", [
+    section("s0", "(lead)", ["p0.0", "p0.1"]),
+    section("s1", "Plot", ["p1.0", "p1.1", "p1.2"]),
+    section("s2", "Series finale", ["p2.0"]),
+  ]);
+  const other = article("en", "The Sixth Sense");
+
+  function revealing(ids: string[]): Policy {
+    return { ...newPolicy(), revealed: new Set(ids) };
+  }
+
+  it("groups what has been opened by the section it sits in", () => {
+    expect(revealedOnPage(open, revealing(["p1.0", "p1.2"]))).toEqual([
+      { section: open.sections[1], ids: ["p1.0", "p1.2"] },
+    ]);
+  });
+
+  it("counts a revealed heading alongside the sentences under it", () => {
+    expect(revealedOnPage(open, revealing(["s2.heading", "p2.0"]))).toEqual([
+      { section: open.sections[2], ids: ["s2.heading", "p2.0"] },
+    ]);
+  });
+
+  it("reports nothing opened while no article is on screen", () => {
+    expect(revealedOnPage(null, revealing(["p1.0"]))).toEqual([]);
+  });
+
+  it("counts only the text sent from the article that is open", () => {
+    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0", "p1.1"]), other, "s4", ["p9.0"]);
+    expect(sentToAgent(scanned, open)).toEqual([{ section: open.sections[1], ids: ["p1.0", "p1.1"] }]);
+  });
+
+  it("summarises the text sent from other articles without naming their sections", () => {
+    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0", "p1.1"]), other, "s4", ["p9.0"]);
+    expect(sentElsewhere(scanned, open)).toEqual([{ articleTitle: "The Sixth Sense", sentences: 1 }]);
+  });
+
+  it("merges a second disclosure into the record of a section already read", () => {
+    const scanned = recordScanned(recordScanned([], open, "s1", ["p1.0"]), open, "s1", ["p1.0", "p1.1"]);
+    expect(scanned).toEqual([
+      {
+        articleKey: articleKey("en", "Attack on Titan"),
+        articleTitle: "Attack on Titan",
+        sectionId: "s1",
+        sent: ["p1.0", "p1.1"],
+      },
+    ]);
+  });
+
+  it("keeps the record of a section read in another article", () => {
+    const scanned = recordScanned(recordScanned([], other, "s4", ["p9.0"]), open, "s1", ["p1.0"]);
+    expect(scannedForArticle(scanned, other)).toEqual(["s4"]);
+    expect(scannedElsewhere(scanned, other)).toEqual([{ articleTitle: "Attack on Titan", sections: 1 }]);
   });
 });

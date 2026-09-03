@@ -10,12 +10,16 @@ import {
 } from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
 import {
-  articleKey,
   policyForOpened,
   readSessionStart,
+  recordScanned,
+  revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
+  sentElsewhere,
+  sentToAgent,
   type ScannedSection,
+  type SectionDisclosure,
 } from "./lib/session";
 import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
@@ -30,6 +34,9 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 
 const SENSITIVITY_KEY = "unspoiled.sensitivity";
 
+/** A section the agent has read can still be one the reader is not allowed to see the name of. */
+const WITHHELD_SECTION = "a section whose heading is withheld";
+
 /** Three points on the scale worth a name, marked where they fall along the slider. */
 const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
   { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
@@ -43,6 +50,10 @@ function sensitivityHint(sensitivity: number): string {
   if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
   if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
   return "Withholds plot summaries, analysis, and any wording that hints at the ending.";
+}
+
+function sentenceCount(sentences: number): string {
+  return sentences === 1 ? "1 sentence" : `${sentences} sentences`;
 }
 
 export default function App() {
@@ -109,14 +120,9 @@ export default function App() {
         },
         openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
-        markScanned: (open, sectionId) => {
-          const key = articleKey(open.lang, open.title);
-          setScanned((current) =>
-            current.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)
-              ? current
-              : [...current, { articleKey: key, articleTitle: open.displayTitle, sectionId }],
-          );
-        },
+        sent: () => sentToAgent(scannedRef.current, articleRef.current).flatMap((entry) => entry.ids),
+        markScanned: (open, sectionId, sent) =>
+          setScanned((current) => recordScanned(current, open, sectionId, sent)),
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
@@ -153,16 +159,21 @@ export default function App() {
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
 
-  /** A section the agent has read can still be one the reader is not allowed to see the name of. */
   const scannedHeadings = useMemo(() => {
     if (!article) return [];
     const ids = scannedForArticle(scanned, article);
     return article.sections
       .filter((section) => ids.includes(section.id))
-      .map((section) => (hiddenHeading(section, policy) ? "a section whose heading is withheld" : sectionHeading(section)));
+      .map((section) => (hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section)));
   }, [article, policy, scanned]);
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
+
+  const openedOnPage = useMemo(() => ledgerRows(revealedOnPage(article, policy), policy), [article, policy]);
+
+  const sentToTheAgent = useMemo(() => ledgerRows(sentToAgent(scanned, article), policy), [article, policy, scanned]);
+
+  const sentFromElsewhere = useMemo(() => sentElsewhere(scanned, article), [article, scanned]);
 
   /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
   const chooseSensitivity = useCallback((sensitivity: number) => {
@@ -365,6 +376,20 @@ export default function App() {
             </section>
           )}
 
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+            <Ledger
+              title="Revealed on your page"
+              rows={openedOnPage}
+              className="border border-zinc-200 bg-white text-zinc-600"
+            />
+            <Ledger
+              title="Text sent to your agent"
+              rows={sentToTheAgent}
+              elsewhere={sentFromElsewhere}
+              className="border border-red-100 bg-red-50 text-red-900"
+            />
+          </div>
+
           <section>
             <h3 className="font-semibold">Tool activity</h3>
             {calls.length === 0 ? (
@@ -394,6 +419,58 @@ export default function App() {
         . Unspoiled is not affiliated with Wikipedia or the Wikimedia Foundation.
       </footer>
     </div>
+  );
+}
+
+type LedgerRow = { sectionId: string; label: string; sentences: number };
+
+function ledgerRows(disclosures: SectionDisclosure[], policy: Policy): LedgerRow[] {
+  return disclosures.map(({ section, ids }) => ({
+    sectionId: section.id,
+    label: hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section),
+    sentences: ids.length,
+  }));
+}
+
+/**
+ * The pair of ledgers is the claim the reader can check: what this page opened on their screen,
+ * and what of the withheld text left it. Both stay on screen empty, so the absence of a disclosure
+ * is as visible as a disclosure.
+ */
+function Ledger({
+  title,
+  rows,
+  elsewhere = [],
+  className,
+}: {
+  title: string;
+  rows: LedgerRow[];
+  elsewhere?: { articleTitle: string; sentences: number }[];
+  className: string;
+}) {
+  return (
+    <section>
+      <h3 className="font-semibold">{title}</h3>
+      {rows.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-zinc-500">Nothing yet.</p>}
+      {rows.length > 0 && (
+        <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
+          {rows.map((row) => (
+            <li key={row.sectionId}>
+              {row.label} — {sentenceCount(row.sentences)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {elsewhere.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-zinc-500">
+          {elsewhere.map((group) => (
+            <li key={group.articleTitle}>
+              {group.articleTitle} — {sentenceCount(group.sentences)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
