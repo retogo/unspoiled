@@ -34,11 +34,12 @@ the agent stays around.
 
 Reading the ending is the job, not the failure. What the page holds the agent to is narrower and
 checkable: **every decision is enforced on the page and displayed to you with the reason given for
-it.** The sections your agent read are listed for the rest of the session. Every call of
-`apply_mask` appears under "Your agent's decisions" in the reader's own words, with the count of
-what it opened and closed — a call that reached nothing included, as "0 shown · 0 hidden" — and any
-sentence it opened is listed under "Revealed on your page". An agent that quietly hides half an
-article has to say so on your screen, and a sentence you disagree about is one tap from coming back.
+it.** The sections your agent has read are named in front of the article for as long as it is open,
+because knowing the ending is not something it can undo. Every call of `apply_mask` says itself as
+it lands — what it showed, what it hid, and why, in the reader's own words — and is kept under
+"Agent activity" beneath the article, a call that reached nothing included, as "0 shown · 0 hidden".
+An agent that quietly hides half an article has to say so on your screen, and a sentence you
+disagree about is one tap from coming back.
 
 **The page works with no agent attached.** A wording heuristic scores every sentence for how much
 of the ending it gives away, and one slider decides how much of that you see. That is the safety

@@ -1,5 +1,5 @@
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Article, Section } from "./segment";
+import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 
 const LANGS: Lang[] = ["en", "ja"];
@@ -20,12 +20,6 @@ export type ScannedSection = {
   articleKey: string;
   articleTitle: string;
   sectionId: string;
-};
-
-/** A run of ids disclosed out of one section, ready to be labelled with that section's heading. */
-export type SectionDisclosure = {
-  section: Section;
-  ids: string[];
 };
 
 function asSensitivity(raw: string | null): number | null {
@@ -128,24 +122,4 @@ export function recordScanned(scanned: ScannedSection[], article: Article, secti
   const key = articleKey(article.lang, article.title);
   if (scanned.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)) return scanned;
   return [...scanned, { articleKey: key, articleTitle: article.displayTitle, sectionId }];
-}
-
-function idsIn(section: Section): string[] {
-  return section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((sentence) => sentence.id));
-}
-
-function disclosedBySection(article: Article | null, disclosed: (id: string) => boolean): SectionDisclosure[] {
-  if (!article) return [];
-  return article.sections.flatMap((section) => {
-    const ids = idsIn(section).filter(disclosed);
-    return ids.length > 0 ? [{ section, ids }] : [];
-  });
-}
-
-/**
- * What a decision has opened in the article on screen, section by section. A sentence a later
- * decision closed again is not open, whichever set it started in.
- */
-export function revealedOnPage(article: Article | null, policy: Policy): SectionDisclosure[] {
-  return disclosedBySection(article, (id) => policy.shown.has(id) && !policy.hidden.has(id));
 }

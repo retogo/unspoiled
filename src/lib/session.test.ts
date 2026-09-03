@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Article, Section } from "./segment";
+import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
   articleKey,
@@ -9,33 +9,18 @@ import {
   readArticleTarget,
   readSessionStart,
   recordScanned,
-  revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
 } from "./session";
 
-function article(lang: Lang, title: string, sections: Section[] = []): Article {
+function article(lang: Lang, title: string): Article {
   return {
     lang,
     title,
     displayTitle: title,
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${title}`,
-    sections,
+    sections: [],
     references: [],
-  };
-}
-
-function section(id: string, heading: string, sentenceIds: string[]): Section {
-  return {
-    id,
-    heading,
-    headingPath: [heading],
-    level: 2,
-    paragraphs: [{ id: `p${id}`, sentences: sentenceIds.map((sentenceId) => ({
-        id: sentenceId,
-        text: sentenceId,
-        runs: [{ kind: "text", text: sentenceId }],
-      })) }],
   };
 }
 
@@ -147,36 +132,8 @@ describe("scanned sections", () => {
   });
 });
 
-describe("what is open on the page", () => {
-  const open = article("en", "Attack on Titan", [
-    section("s0", "(lead)", ["p0.0", "p0.1"]),
-    section("s1", "Plot", ["p1.0", "p1.1", "p1.2"]),
-    section("s2", "Series finale", ["p2.0"]),
-  ]);
-
-  function showing(ids: string[]): Policy {
-    return { ...newPolicy(), shown: new Set(ids) };
-  }
-
-  it("groups what has been opened by the section it sits in", () => {
-    expect(revealedOnPage(open, showing(["p1.0", "p1.2"]))).toEqual([
-      { section: open.sections[1], ids: ["p1.0", "p1.2"] },
-    ]);
-  });
-
-  it("leaves out a sentence a decision closed again", () => {
-    expect(revealedOnPage(open, { ...showing(["p1.0"]), hidden: new Set(["p1.2"]) })).toEqual([
-      { section: open.sections[1], ids: ["p1.0"] },
-    ]);
-  });
-
-  it("reports nothing opened while no article is on screen", () => {
-    expect(revealedOnPage(null, showing(["p1.0"]))).toEqual([]);
-  });
-});
-
 describe("the record of what the agent has read", () => {
-  const open = article("en", "Attack on Titan", []);
+  const open = article("en", "Attack on Titan");
   const other = article("en", "The Sixth Sense");
 
   it("records a section once, however often it is read", () => {

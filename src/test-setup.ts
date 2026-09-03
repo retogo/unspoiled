@@ -25,3 +25,6 @@ beforeEach(() => {
 });
 
 vi.stubGlobal("matchMedia", () => query);
+
+/** jsdom does not scroll, and the page asks it to bring the activity drawer into view. */
+Element.prototype.scrollIntoView = () => {};

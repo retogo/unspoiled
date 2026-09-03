@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { flowDelay, flowRuns, flowTimings, flowWords, type FlowTiming } from "./lib/flow";
 import { bottomOverlap, scrollToFollow } from "./lib/scroll";
@@ -36,11 +37,9 @@ import {
   readArticleTarget,
   readSessionStart,
   recordScanned,
-  revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
   type ScannedSection,
-  type SectionDisclosure,
   type SharedArticle,
 } from "./lib/session";
 import {
@@ -123,9 +122,22 @@ function sentenceCount(sentences: number): string {
   return sentences === 1 ? "1 sentence" : `${sentences} sentences`;
 }
 
-function sentenceTotal(rows: { sentences: number }[]): number {
-  return rows.reduce((total, row) => total + row.sentences, 0);
+function plural(count: number, noun: string): string {
+  return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
 }
+
+/** The clock, not the calendar: a decision is placed within the session, not within the year. */
+function atTime(at: number): string {
+  const when = new Date(at);
+  return `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
+}
+
+function maskSummary(decision: Decision): string {
+  return `Your agent showed ${sentenceCount(decision.show.length)} and hid ${decision.hide.length}`;
+}
+
+/** Long enough to read a reason, short enough that the reader is not made to dismiss it. */
+const NOTICE_MS = 6000;
 
 export default function App() {
   const [start] = useState(() =>
@@ -141,6 +153,7 @@ export default function App() {
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
   const [flowing, setFlowing] = useState<ReadonlyMap<string, FlowTiming>>(new Map());
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
+  const [notice, setNotice] = useState<Decision | null>(null);
 
   /*
    * The tools are handed to the browser once, on mount, and are called long afterwards, so they read
@@ -285,11 +298,35 @@ export default function App() {
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
 
-  const openedOnPage = useMemo(() => ledgerRows(revealedOnPage(article, policy)), [article, policy]);
+  /*
+   * A decision lands while the reader is reading, so it says so once, in passing, and then gets out
+   * of the way — the record of it stays in the drawer under the article. Only `apply_mask` writes to
+   * `decisions`, so a reader opening a sentence for themselves is never announced back to them.
+   */
+  const activityRef = useRef<HTMLDetailsElement | null>(null);
+  const announcedRef = useRef(policy.decisions.length);
+  useEffect(() => {
+    const announced = announcedRef.current;
+    announcedRef.current = policy.decisions.length;
+    if (policy.decisions.length === announced) return;
+    setNotice(policy.decisions.at(-1) ?? null);
+  }, [policy.decisions]);
 
-  const openedCount = sentenceTotal(openedOnPage);
+  useEffect(() => {
+    if (!notice) return;
+    const fade = window.setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => window.clearTimeout(fade);
+  }, [notice]);
 
-  const readCount = scannedHeadings.length + elsewhere.reduce((total, group) => total + group.sections, 0);
+  const openActivity = useCallback(() => {
+    setNotice(null);
+    const drawer = activityRef.current;
+    if (!drawer) return;
+    drawer.open = true;
+    /* The drawer can be tens of thousands of pixels down a long article, which is too far to travel
+       smoothly: the reader asked to see it, so the page goes there the way a link does. */
+    drawer.scrollIntoView({ block: "center" });
+  }, []);
 
   /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
   const chooseSensitivity = useCallback((sensitivity: number) => {
@@ -474,44 +511,6 @@ export default function App() {
               <p className="hidden text-xs leading-5 text-muted lg:block">{sensitivityHint(policy.sensitivity)}</p>
             </div>
           </section>
-
-          <Panel title="Your agent's decisions" count={policy.decisions.length}>
-            <Decisions decisions={policy.decisions} />
-          </Panel>
-
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
-            <Panel title="Revealed on your page" count={openedCount}>
-              <Ledger
-                title="Revealed on your page"
-                rows={openedOnPage}
-                className="border border-line bg-surface text-mask-ink"
-              />
-            </Panel>
-            <Panel title="Your agent has read" count={readCount}>
-              <HasRead sections={scannedHeadings} elsewhere={elsewhere} />
-            </Panel>
-          </div>
-
-          <Panel title="Tool activity" count={calls.length}>
-            <section>
-              <h3 className="font-semibold">Tool activity</h3>
-              {calls.length === 0 ? (
-                <p className="mt-1 text-xs text-muted">Nothing yet. Ask your agent to filter this page.</p>
-              ) : (
-                <ul className="mt-1 space-y-1 text-xs">
-                  {calls.map((call) => (
-                    <li key={`${call.at}-${call.tool}`} className="rounded bg-surface px-2 py-1">
-                      <code className="font-medium">{call.tool}</code>
-                      {!call.ok && <span className="ml-1 font-medium text-alert-text">error</span>}
-                      <span className={`block ${call.ok ? "text-muted" : "text-alert-text"}`}>
-                        {call.input} → {call.summary}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </Panel>
         </aside>
 
         <div className="min-w-0">
@@ -544,6 +543,7 @@ export default function App() {
                   original article
                 </a>
               </p>
+              {scannedHeadings.length > 0 && <ReadWarning sections={scannedHeadings} />}
               {article.sections.map((section) => (
                 <SectionView
                   key={section.id}
@@ -574,8 +574,37 @@ export default function App() {
               )}
             </article>
           )}
+
+          {article && (
+            <AgentActivity
+              decisions={policy.decisions}
+              calls={calls}
+              elsewhere={elsewhere}
+              drawerRef={activityRef}
+            />
+          )}
         </div>
       </main>
+
+      {/*
+        A live region that is always in the page, so what lands in it is announced rather than
+        arriving as a new region the reader is never told about.
+      */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed inset-x-5 bottom-24 z-20 lg:inset-x-auto lg:right-6 lg:bottom-6 lg:max-w-xs"
+      >
+        {notice && (
+          <button
+            onClick={openActivity}
+            className="unspoiled-mask pointer-events-auto w-full rounded-lg border border-line bg-surface px-3 py-2 text-left text-xs shadow-lg"
+          >
+            <span className="block font-medium">{maskSummary(notice)}</span>
+            <span className="block text-muted">{notice.reason}</span>
+          </button>
+        )}
+      </div>
 
       <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-muted">
         Article text from Wikipedia, licensed{" "}
@@ -588,113 +617,96 @@ export default function App() {
   );
 }
 
-type LedgerRow = { sectionId: string; label: string; sentences: number };
-
-function ledgerRows(disclosures: SectionDisclosure[]): LedgerRow[] {
-  return disclosures.map(({ section, ids }) => ({
-    sectionId: section.id,
-    label: sectionHeading(section),
-    sentences: ids.length,
-  }));
-}
-
 /**
- * Below `lg` the sidebar sits above the article, so each panel folds away and its summary carries
- * the count: a folded panel still says how much it holds. From `lg` up the summary steps aside and
- * the fold is held open in CSS, leaving a plain section in the right column.
+ * The one thing about the agent the reader cannot afford to miss, so it stands in front of the
+ * article rather than beside it: the sections it has read in full, which are the sections whose
+ * endings it now knows. There is nothing to dismiss it with, because reading cannot be undone and a
+ * warning the reader can close is a warning they will close.
  */
-function Panel({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+function ReadWarning({ sections }: { sections: string[] }) {
   return (
-    <details className="panel">
-      <summary className="cursor-pointer rounded-lg border border-line bg-surface px-3 py-2 font-semibold">
-        {title} · {count}
-      </summary>
-      {children}
-    </details>
+    <div className="mt-3 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
+      <p className="font-medium">{`Your agent has read: ${sections.join(", ")}`}</p>
+      <p className="mt-0.5">
+        In this conversation your agent knows what those sections say, even where the page still
+        withholds them.
+      </p>
+    </div>
   );
 }
 
 /**
- * What the agent decided, in the words it gave for deciding it, newest first. The agent's judgement
- * is the only part of the filtering that is not written down anywhere else on the page, so this is
- * where the reader checks that what they are looking at is what they asked for.
+ * Everything the agent has done to this page, kept where it can be checked rather than where it has
+ * to be looked at: the decisions in the words the agent gave for them, and the calls underneath.
+ * A reader who is reading does not need any of it, so it is folded away — each decision has already
+ * said itself once as it landed, and this is where it is still findable afterwards.
  */
-function Decisions({ decisions }: { decisions: Decision[] }) {
-  const newestFirst = [...decisions].reverse();
-  return (
-    <section>
-      <h3 className="font-semibold">Your agent&apos;s decisions</h3>
-      {newestFirst.length === 0 ? (
-        <p className="mt-1 text-xs text-muted">Nothing yet. Ask your agent to filter this page.</p>
-      ) : (
-        <ul className="mt-1 space-y-1 text-xs">
-          {newestFirst.map((decision, index) => (
-            <li key={newestFirst.length - index} className="rounded-lg border border-line bg-surface px-3 py-2">
-              <span className="block">{decision.reason}</span>
-              <span className="block tabular-nums text-muted">
-                {decision.show.length} shown · {decision.hide.length} hidden
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/**
- * The sections the agent has read in full, which is every section it was asked to judge. It knows
- * those endings for the rest of the conversation, so the reader is told which ones rather than
- * left to infer it from what came back masked.
- */
-function HasRead({
-  sections,
+function AgentActivity({
+  decisions,
+  calls,
   elsewhere,
+  drawerRef,
 }: {
-  sections: string[];
+  decisions: Decision[];
+  calls: ToolCall[];
   elsewhere: { articleTitle: string; sections: number }[];
+  drawerRef: RefObject<HTMLDetailsElement | null>;
 }) {
+  const newestFirst = [...decisions].reverse();
+  const summary = `Agent activity · ${plural(decisions.length, "decision")} · ${plural(calls.length, "call")}`;
   return (
-    <section>
-      <h3 className="font-semibold">Your agent has read</h3>
-      {sections.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
-      {sections.length > 0 && (
-        <p className="mt-1 rounded-lg bg-alert-surface px-3 py-2 text-xs text-alert-ink">
-          {sections.join(", ")}. It knows those spoilers for the rest of this conversation.
-        </p>
-      )}
-      {elsewhere.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-xs text-muted">
-          {elsewhere.map((group) => (
-            <li key={group.articleTitle}>
-              {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-/**
- * What this page has opened on the reader's screen, section by section. It stays on screen empty,
- * so the absence of a disclosure is as visible as a disclosure.
- */
-function Ledger({ title, rows, className }: { title: string; rows: LedgerRow[]; className: string }) {
-  return (
-    <section>
-      <h3 className="font-semibold">{title}</h3>
-      {rows.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
-      {rows.length > 0 && (
-        <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
-          {rows.map((row) => (
-            <li key={row.sectionId}>
-              {row.label} — {sentenceCount(row.sentences)}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+    <details ref={drawerRef} className="mt-10 scroll-mt-6 rounded-lg border border-line bg-surface text-xs">
+      <summary className="cursor-pointer px-3 py-2 font-medium text-muted">{summary}</summary>
+      <div className="space-y-4 border-t border-line px-3 py-3">
+        <section>
+          <h4 className="font-semibold">Decisions</h4>
+          {newestFirst.length === 0 ? (
+            <p className="mt-1 text-muted">Nothing yet. Ask your agent to filter this page.</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {newestFirst.map((decision, index) => (
+                <li key={newestFirst.length - index} className="rounded-lg bg-paper px-3 py-2">
+                  <span className="block tabular-nums text-muted">
+                    {atTime(decision.at)} · {decision.show.length} shown · {decision.hide.length} hidden
+                  </span>
+                  <span className="block">{decision.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section>
+          <h4 className="font-semibold">Tool calls</h4>
+          {calls.length === 0 ? (
+            <p className="mt-1 text-muted">Nothing yet.</p>
+          ) : (
+            <ul className="mt-1 space-y-1">
+              {calls.map((call) => (
+                <li key={`${call.at}-${call.tool}`} className="rounded bg-paper px-2 py-1">
+                  <code className="font-medium">{call.tool}</code>
+                  {!call.ok && <span className="ml-1 font-medium text-alert-text">error</span>}
+                  <span className={`block ${call.ok ? "text-muted" : "text-alert-text"}`}>
+                    {call.input} → {call.summary}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        {elsewhere.length > 0 && (
+          <section>
+            <h4 className="font-semibold">Read elsewhere</h4>
+            <ul className="mt-1 space-y-0.5 text-muted">
+              {elsewhere.map((group) => (
+                <li key={group.articleTitle}>
+                  {group.articleTitle} — {plural(group.sections, "section")}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </details>
   );
 }
 
