@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { fetchArticle, type FetchedArticle, type Lang } from "./lib/wikipedia";
@@ -139,7 +139,7 @@ describe("the history entries the reader can go back through", () => {
     await openArticle(registered, "en", "Attack on Titan");
     pushState.mockClear();
 
-    await callTool(registered, "set_spoiler_policy", { sensitivity: 20 });
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "20" } });
 
     expect(pushState).not.toHaveBeenCalled();
     expect(window.location.search).toContain("sensitivity=20");
@@ -193,7 +193,7 @@ describe("going back", () => {
   it("keeps the sensitivity the reader is reading at, not the one in the old URL", async () => {
     const registered = await renderWithAgent();
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "set_spoiler_policy", { sensitivity: 20 });
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "20" } });
     await openArticle(registered, "en", "The Sixth Sense");
 
     await browserGoesTo("?sensitivity=95&lang=en&title=Attack+on+Titan");
