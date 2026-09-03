@@ -11,13 +11,25 @@ import {
 } from "./lib/risk";
 import { segmentArticle, sectionHeading, type Article, type Paragraph, type Section } from "./lib/segment";
 import {
-  articleKey,
   policyForOpened,
   readSessionStart,
+  recordScanned,
+  revealedOnPage,
   scannedElsewhere,
   scannedForArticle,
+  sentElsewhere,
+  sentToAgent,
   type ScannedSection,
+  type SectionDisclosure,
 } from "./lib/session";
+import {
+  applyTheme,
+  DARK_SCHEME_QUERY,
+  readTheme,
+  resolveTheme,
+  THEME_KEY,
+  type ThemeChoice,
+} from "./lib/theme";
 import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
 import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
@@ -31,11 +43,20 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 
 const SENSITIVITY_KEY = "unspoiled.sensitivity";
 
+/** A section the agent has read can still be one the reader is not allowed to see the name of. */
+const WITHHELD_SECTION = "a section whose heading is withheld";
+
 /** Three points on the scale worth a name, marked where they fall along the slider. */
 const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
   { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
   { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
   { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
+];
+
+const THEMES: { choice: ThemeChoice; label: string }[] = [
+  { choice: "light", label: "Light" },
+  { choice: "dark", label: "Dark" },
+  { choice: "system", label: "System" },
 ];
 
 function sensitivityHint(sensitivity: number): string {
@@ -44,6 +65,10 @@ function sensitivityHint(sensitivity: number): string {
   if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
   if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
   return "Withholds plot summaries, analysis, and any wording that hints at the ending.";
+}
+
+function sentenceCount(sentences: number): string {
+  return sentences === 1 ? "1 sentence" : `${sentences} sentences`;
 }
 
 export default function App() {
@@ -61,6 +86,7 @@ export default function App() {
   const [calls, setCalls] = useState<ToolCall[]>([]);
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
   const [flowing, setFlowing] = useState<ReadonlyMap<string, number>>(new Map());
+  const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
@@ -111,14 +137,9 @@ export default function App() {
         },
         openArticle: (toolLang, title) => openArticleRef.current(toolLang, title),
         scanned: () => scannedForArticle(scannedRef.current, articleRef.current),
-        markScanned: (open, sectionId) => {
-          const key = articleKey(open.lang, open.title);
-          setScanned((current) =>
-            current.some((entry) => entry.articleKey === key && entry.sectionId === sectionId)
-              ? current
-              : [...current, { articleKey: key, articleTitle: open.displayTitle, sectionId }],
-          );
-        },
+        sent: () => sentToAgent(scannedRef.current, articleRef.current).flatMap((entry) => entry.ids),
+        markScanned: (open, sectionId, sent) =>
+          setScanned((current) => recordScanned(current, open, sectionId, sent)),
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
@@ -140,6 +161,20 @@ export default function App() {
     window.history.replaceState(null, "", `?${params}`);
   }, [article, policy.sensitivity]);
 
+  /** `system` is not a paint order, so it is resolved here and again whenever the system changes. */
+  useEffect(() => {
+    const system = window.matchMedia(DARK_SCHEME_QUERY);
+    const paint = () => applyTheme(resolveTheme(theme, system.matches));
+    paint();
+    system.addEventListener("change", paint);
+    return () => system.removeEventListener("change", paint);
+  }, [theme]);
+
+  const chooseTheme = useCallback((choice: ThemeChoice) => {
+    window.localStorage.setItem(THEME_KEY, choice);
+    setTheme(choice);
+  }, []);
+
   const search = useCallback(async () => {
     if (term.trim().length === 0) return;
     setLoading(true);
@@ -155,16 +190,21 @@ export default function App() {
 
   const counts = useMemo(() => (article ? countHidden(article, policy) : null), [article, policy]);
 
-  /** A section the agent has read can still be one the reader is not allowed to see the name of. */
   const scannedHeadings = useMemo(() => {
     if (!article) return [];
     const ids = scannedForArticle(scanned, article);
     return article.sections
       .filter((section) => ids.includes(section.id))
-      .map((section) => (hiddenHeading(section, policy) ? "a section whose heading is withheld" : sectionHeading(section)));
+      .map((section) => (hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section)));
   }, [article, policy, scanned]);
 
   const elsewhere = useMemo(() => scannedElsewhere(scanned, article), [article, scanned]);
+
+  const openedOnPage = useMemo(() => ledgerRows(revealedOnPage(article, policy), policy), [article, policy]);
+
+  const sentToTheAgent = useMemo(() => ledgerRows(sentToAgent(scanned, article), policy), [article, policy, scanned]);
+
+  const sentFromElsewhere = useMemo(() => sentElsewhere(scanned, article), [article, scanned]);
 
   /** Only a sensitivity the reader or their agent chose is remembered; one that arrived in a link is not. */
   const chooseSensitivity = useCallback((sensitivity: number) => {
@@ -204,17 +244,17 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <header className="border-b border-zinc-200 bg-white">
+      <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-4">
           <h1 className="text-xl font-semibold tracking-tight">Unspoiled</h1>
-          <p className="text-sm text-zinc-500">Read Wikipedia without learning the ending.</p>
+          <p className="text-sm text-muted">Read Wikipedia without learning the ending.</p>
           <span
             className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
               registration.api === "unavailable"
-                ? "bg-zinc-100 text-zinc-500"
+                ? "bg-raised text-muted"
                 : registration.error
-                  ? "bg-amber-50 text-amber-900"
-                  : "bg-emerald-50 text-emerald-700"
+                  ? "bg-warn-surface text-warn-ink"
+                  : "bg-ok-surface text-ok-ink"
             }`}
           >
             {registration.api === "unavailable"
@@ -223,6 +263,20 @@ export default function App() {
                 ? `This page could not expose its tools — ${registration.error}`
                 : `${registration.toolCount} tools exposed via ${registration.api}`}
           </span>
+          <div role="group" aria-label="Page theme" className="flex gap-0.5 rounded-full bg-raised p-0.5">
+            {THEMES.map((option) => (
+              <button
+                key={option.choice}
+                onClick={() => chooseTheme(option.choice)}
+                aria-pressed={theme === option.choice}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  theme === option.choice ? "bg-ink text-inverse" : "text-muted hover:text-ink"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -232,7 +286,7 @@ export default function App() {
             <select
               value={lang}
               onChange={(event) => setLang(event.target.value as Lang)}
-              className="rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm"
+              className="rounded-lg border border-edge bg-surface px-2 py-2 text-sm"
             >
               <option value="en">English</option>
               <option value="ja">日本語</option>
@@ -244,11 +298,11 @@ export default function App() {
                 if (event.key === "Enter" && !event.nativeEvent.isComposing) void search();
               }}
               placeholder="Search Wikipedia for a film, series or novel"
-              className="min-w-0 flex-1 basis-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm sm:basis-auto"
+              className="min-w-0 flex-1 basis-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm sm:basis-auto"
             />
             <button
               onClick={() => void search()}
-              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white"
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-inverse"
             >
               Search
             </button>
@@ -260,28 +314,28 @@ export default function App() {
                 <button
                   key={`${demo.lang}:${demo.title}`}
                   onClick={() => void openArticle(demo.lang, demo.title)}
-                  className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm hover:border-zinc-400"
+                  className="rounded-lg border border-edge bg-surface px-3 py-2 text-left text-sm hover:border-edge-hover"
                 >
                   <span className="font-medium">{demo.title}</span>
-                  <span className="block text-xs text-zinc-500">{demo.note}</span>
+                  <span className="block text-xs text-muted">{demo.note}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {loading && <p className="mt-6 text-sm text-zinc-500">Loading…</p>}
-          {error && <p className="mt-6 text-sm text-red-700">{error}</p>}
+          {loading && <p className="mt-6 text-sm text-muted">Loading…</p>}
+          {error && <p className="mt-6 text-sm text-alert-text">{error}</p>}
 
           {hits.length > 0 && (
-            <ul className="mt-4 divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
+            <ul className="mt-4 divide-y divide-line rounded-lg border border-line bg-surface">
               {hits.map((hit) => (
                 <li key={hit.title}>
                   <button
                     onClick={() => void openArticle(lang, hit.title)}
-                    className="block w-full px-4 py-3 text-left hover:bg-zinc-50"
+                    className="block w-full px-4 py-3 text-left hover:bg-row-hover"
                   >
                     <span className="text-sm font-medium">{hit.title}</span>
-                    <span className="block text-xs text-zinc-500">{hit.snippet}</span>
+                    <span className="block text-xs text-muted">{hit.snippet}</span>
                   </button>
                 </li>
               ))}
@@ -291,7 +345,7 @@ export default function App() {
           {article && (
             <article className="mt-6">
               <h2 className="text-2xl font-semibold tracking-tight">{article.displayTitle}</h2>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-muted">
                 {counts?.hidden} of {counts?.total} sentences withheld ·{" "}
                 <a className="underline" href={article.sourceUrl} target="_blank" rel="noreferrer">
                   original article
@@ -315,13 +369,13 @@ export default function App() {
         <aside className="space-y-5 text-sm lg:sticky lg:top-6 lg:self-start">
           <section>
             <h3 className="font-semibold">Your policy</h3>
-            <div className="mt-2 rounded-lg border border-zinc-200 bg-white px-3 pt-2.5 pb-2">
+            <div className="mt-2 rounded-lg border border-line bg-surface px-3 pt-2.5 pb-2">
               <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                 <label htmlFor="sensitivity" className="font-medium tabular-nums">
                   Sensitivity {policy.sensitivity}
                 </label>
                 {counts && (
-                  <span className="text-xs tabular-nums text-zinc-500">
+                  <span className="text-xs tabular-nums text-muted">
                     {counts.hidden} of {counts.total} sentences withheld
                   </span>
                 )}
@@ -349,18 +403,18 @@ export default function App() {
                     } ${
                       policy.sensitivity === preset.sensitivity
                         ? "font-medium text-ink"
-                        : "text-zinc-500 hover:text-ink"
+                        : "text-muted hover:text-ink"
                     }`}
                   >
-                    <span className="h-1.5 w-px bg-zinc-300" />
+                    <span className="h-1.5 w-px bg-edge" />
                     {preset.label}
                   </button>
                 ))}
               </div>
-              <p className="text-xs leading-5 text-zinc-500">{sensitivityHint(policy.sensitivity)}</p>
+              <p className="text-xs leading-5 text-muted">{sensitivityHint(policy.sensitivity)}</p>
             </div>
             {policy.alreadyKnows.length > 0 && (
-              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <div className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
                 <p className="font-medium">Your agent says you already know</p>
                 <ul className="mt-1 list-inside list-disc">
                   {policy.alreadyKnows.map((item) => (
@@ -376,7 +430,7 @@ export default function App() {
               </div>
             )}
             {policy.notes && (
-              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <p className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
                 Your agent said: {policy.notes}
               </p>
             )}
@@ -386,12 +440,12 @@ export default function App() {
             <section>
               <h3 className="font-semibold">Your agent has read</h3>
               {scannedHeadings.length > 0 && (
-                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                <p className="mt-1 rounded-lg bg-alert-surface px-3 py-2 text-xs text-alert-ink">
                   {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
                 </p>
               )}
               {elsewhere.length > 0 && (
-                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
+                <ul className="mt-1 space-y-1 text-xs text-muted">
                   {elsewhere.map((group) => (
                     <li key={group.articleTitle}>
                       {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
@@ -402,17 +456,31 @@ export default function App() {
             </section>
           )}
 
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+            <Ledger
+              title="Revealed on your page"
+              rows={openedOnPage}
+              className="border border-line bg-surface text-mask-ink"
+            />
+            <Ledger
+              title="Text sent to your agent"
+              rows={sentToTheAgent}
+              elsewhere={sentFromElsewhere}
+              className="border border-alert-line bg-alert-surface text-alert-ink"
+            />
+          </div>
+
           <section>
             <h3 className="font-semibold">Tool activity</h3>
             {calls.length === 0 ? (
-              <p className="mt-1 text-xs text-zinc-500">Nothing yet. Ask your agent to filter this page.</p>
+              <p className="mt-1 text-xs text-muted">Nothing yet. Ask your agent to filter this page.</p>
             ) : (
               <ul className="mt-1 space-y-1 text-xs">
                 {calls.map((call) => (
-                  <li key={`${call.at}-${call.tool}`} className="rounded bg-white px-2 py-1">
+                  <li key={`${call.at}-${call.tool}`} className="rounded bg-surface px-2 py-1">
                     <code className="font-medium">{call.tool}</code>
-                    {!call.ok && <span className="ml-1 font-medium text-red-700">error</span>}
-                    <span className={`block ${call.ok ? "text-zinc-500" : "text-red-700"}`}>
+                    {!call.ok && <span className="ml-1 font-medium text-alert-text">error</span>}
+                    <span className={`block ${call.ok ? "text-muted" : "text-alert-text"}`}>
                       {call.input} → {call.summary}
                     </span>
                   </li>
@@ -423,7 +491,7 @@ export default function App() {
         </aside>
       </main>
 
-      <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-zinc-500">
+      <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-muted">
         Article text from Wikipedia, licensed{" "}
         <a className="underline" href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">
           CC BY-SA 4.0
@@ -431,6 +499,58 @@ export default function App() {
         . Unspoiled is not affiliated with Wikipedia or the Wikimedia Foundation.
       </footer>
     </div>
+  );
+}
+
+type LedgerRow = { sectionId: string; label: string; sentences: number };
+
+function ledgerRows(disclosures: SectionDisclosure[], policy: Policy): LedgerRow[] {
+  return disclosures.map(({ section, ids }) => ({
+    sectionId: section.id,
+    label: hiddenHeading(section, policy) ? WITHHELD_SECTION : sectionHeading(section),
+    sentences: ids.length,
+  }));
+}
+
+/**
+ * The pair of ledgers is the claim the reader can check: what this page opened on their screen,
+ * and what of the withheld text left it. Both stay on screen empty, so the absence of a disclosure
+ * is as visible as a disclosure.
+ */
+function Ledger({
+  title,
+  rows,
+  elsewhere = [],
+  className,
+}: {
+  title: string;
+  rows: LedgerRow[];
+  elsewhere?: { articleTitle: string; sentences: number }[];
+  className: string;
+}) {
+  return (
+    <section>
+      <h3 className="font-semibold">{title}</h3>
+      {rows.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
+      {rows.length > 0 && (
+        <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
+          {rows.map((row) => (
+            <li key={row.sectionId}>
+              {row.label} — {sentenceCount(row.sentences)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {elsewhere.length > 0 && (
+        <ul className="mt-1 space-y-0.5 text-xs text-muted">
+          {elsewhere.map((group) => (
+            <li key={group.articleTitle}>
+              {group.articleTitle} — {sentenceCount(group.sentences)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -478,7 +598,7 @@ function SectionView({
     return (
       <section className="mt-6">
         {heading}
-        <p className="unspoiled-mask mt-2 text-xs text-zinc-500">
+        <p className="unspoiled-mask mt-2 text-xs text-muted">
           {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
           open only as far as you have watched.
         </p>
@@ -487,10 +607,10 @@ function SectionView({
             <button
               key={paragraph.id}
               onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
-              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-left text-xs text-zinc-600 hover:border-zinc-400"
+              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-edge bg-surface px-3 py-2 text-left text-xs text-mask-ink hover:border-edge-hover"
             >
               <span className="font-medium">Paragraph {index + 1}</span>
-              <span className="text-zinc-400">
+              <span className="text-faint">
                 {paragraph.sentences.length} sentences ·{" "}
                 {paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0)} chars
               </span>
@@ -513,7 +633,7 @@ function SectionView({
                 key={run.key}
                 onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
                 title={run.reason}
-                className="unspoiled-mask mx-0.5 rounded bg-zinc-200 px-2 py-0.5 align-baseline text-xs text-zinc-600 hover:bg-zinc-300"
+                className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
               >
                 {run.sentences.length === 1 ? "1 sentence" : `${run.sentences.length} sentences`} withheld · reveal
               </button>
@@ -537,7 +657,7 @@ function SectionView({
 }
 
 /** The marker that says a run of text is on screen because the reader opened it, and can be closed again. */
-const OPENED = "underline decoration-dotted decoration-zinc-300 underline-offset-4";
+const OPENED = "underline decoration-dotted decoration-edge underline-offset-4";
 
 /**
  * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
@@ -604,7 +724,7 @@ function HideButton({ label, onClick }: { label: string; onClick: () => void }) 
       onClick={onClick}
       aria-label={label}
       title="Hide again"
-      className="inline-block w-2.5 rounded align-baseline text-center text-[11px] leading-none text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-zinc-700 focus-visible:opacity-100"
+      className="inline-block w-2.5 rounded align-baseline text-center text-[11px] leading-none text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
     >
       ×
     </button>
@@ -647,12 +767,12 @@ function SectionHeading({
   );
 
   return (
-    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
+    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-line pb-1 text-lg font-semibold">
       {withheldHeading ? (
         <button
           onClick={() => onReveal([id])}
           title={withheldHeading.reason}
-          className="unspoiled-mask rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
+          className="unspoiled-mask rounded bg-mask px-2 py-0.5 text-sm font-medium text-mask-ink hover:bg-mask-hover"
         >
           Heading withheld · reveal
         </button>
@@ -660,12 +780,12 @@ function SectionHeading({
         heading
       )}
       {known ? (
-        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+        <span className="rounded bg-warn-badge px-1.5 py-0.5 text-[11px] font-medium text-warn-ink">
           shown — {known}
         </span>
       ) : (
         hidden > 0 && (
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-zinc-600">
+          <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-mask-ink">
             {hidden} withheld
           </span>
         )
@@ -673,7 +793,7 @@ function SectionHeading({
       {opened.length > 1 && (
         <button
           onClick={() => onHide(opened)}
-          className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-200"
+          className="rounded bg-mask px-1.5 py-0.5 text-[11px] font-medium text-mask-ink hover:bg-mask-hover"
         >
           Hide {opened.length} sentences again
         </button>

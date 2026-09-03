@@ -8,6 +8,18 @@
       name="description"
       content="Unspoiled reads Wikipedia with the spoilers held back, and lets your AI agent decide what to hide based on what you already know."
     />
+    <script>
+      // The smallest copy of readTheme and resolveTheme in src/lib/theme.ts there can be: the theme
+      // has to be on the element before the first paint, which is before React runs.
+      (() => {
+        const stored = localStorage.getItem("unspoiled.theme");
+        const choice = stored === "light" || stored === "dark" ? stored : "system";
+        const dark =
+          choice === "dark" ||
+          (choice === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
