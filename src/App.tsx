@@ -22,6 +22,7 @@ import {
 } from "./lib/risk";
 import {
   segmentArticle,
+  isLead,
   sectionHeading,
   type Article,
   type Paragraph,
@@ -1144,7 +1145,9 @@ function FlowingText({
 
 /**
  * A heading names its section and is never withheld: an agent that cannot say which section it
- * masked cannot explain its own decision, and the reader cannot check it.
+ * masked cannot explain its own decision, and the reader cannot check it. The lead has no heading in
+ * the article, so the page does not invent one for it — only the counts the heading row carries stay,
+ * on a line of their own, and that line is there only when it has something to say.
  */
 function SectionHeading({
   section,
@@ -1157,9 +1160,8 @@ function SectionHeading({
   opened: string[];
   onHide: (ids: string[]) => void;
 }) {
-  return (
-    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-line pb-1 text-lg font-semibold">
-      {sectionHeading(section)}
+  const counts = (
+    <>
       {hidden > 0 && (
         <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-mask-ink">
           {hidden} withheld
@@ -1173,6 +1175,18 @@ function SectionHeading({
           Hide {opened.length} sentences again
         </button>
       )}
+    </>
+  );
+
+  if (isLead(section)) {
+    if (hidden === 0 && opened.length <= 1) return null;
+    return <div className="flex flex-wrap items-baseline gap-2">{counts}</div>;
+  }
+
+  return (
+    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-line pb-1 text-lg font-semibold">
+      {sectionHeading(section)}
+      {counts}
     </h3>
   );
 }

@@ -160,6 +160,11 @@ describe("open_article", () => {
     expect(sectionOf(await describe(), "s1").withheld).toBe(0);
   });
 
+  it("names the lead section rather than inventing a heading for it", async () => {
+    expect(sectionOf(await harness().outline(), "s0").heading).toBe("Lead section");
+    expect(sectionOf(await harness().outline(), "s0").heading_path).toEqual(["Lead section"]);
+  });
+
   it("reports the article a bare call is describing", async () => {
     const result = await harness().outline();
     expect(result.title).toBe("Fight Club (film)");

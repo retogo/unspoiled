@@ -1,4 +1,4 @@
-import type { Article, Paragraph, Section } from "./segment";
+import { sectionHeading, sectionHeadingPath, type Article, type Paragraph, type Section } from "./segment";
 import { assessSection, hiddenSentence, maskWith, type Policy } from "./risk";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
@@ -107,8 +107,8 @@ function outlineSection(section: Section, policy: Policy) {
   }
   return {
     section_id: section.id,
-    heading: section.heading,
-    heading_path: section.headingPath,
+    heading: sectionHeading(section),
+    heading_path: sectionHeadingPath(section),
     risk: assessSection(section).level,
     sentences: sentences.length,
     withheld,
@@ -144,7 +144,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "open_article",
       description:
-        "Open a Wikipedia article in the reader and wait until it is on screen, or call it with no arguments to describe the article already open. Returns the outline: every section with its heading, how many sentences it holds and how many of them the reader is currently being shown. No article text — call read_article_content next for that. The ids in the outline belong to this article only.",
+        "Open a Wikipedia article in the reader and wait until it is on screen, or call it with no arguments to describe the article already open. Returns the outline: every section with its heading, how many sentences it holds and how many of them the reader is currently being shown. The lead section has no heading in the article and is reported as \"Lead section\". No article text — call read_article_content next for that. The ids in the outline belong to this article only.",
       inputSchema: {
         type: "object",
         properties: {
@@ -172,7 +172,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "read_article_content",
       description:
-        "Read the article in full, spoilers included, with an id on every sentence. Reading the ending is the job, not a mistake: you read it so the reader does not have to, then call apply_mask to decide which sentences reach their screen. `shown` says whether each sentence is on that screen now. Do not repeat what you read here in your reply — the reader is reading this article precisely because they do not want to be told how it ends. The sections you read are listed on their screen for the rest of the session.",
+        "Read the article in full, spoilers included, with an id on every sentence. Reading the ending is the job, not a mistake: you read it so the reader does not have to, then call apply_mask to decide which sentences reach their screen. `shown` says whether each sentence is on that screen now. Do not repeat what you read here in your reply — the reader is reading this article precisely because they do not want to be told how it ends. The lead section is reported as \"Lead section\", as in open_article. The sections you read are listed on their screen for the rest of the session.",
       inputSchema: {
         type: "object",
         properties: {
@@ -195,7 +195,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         return {
           sections: sections.map((section) => ({
             section_id: section.id,
-            heading: section.heading,
+            heading: sectionHeading(section),
             paragraphs: section.paragraphs.map((paragraph) => ({
               paragraph_id: paragraph.id,
               sentences: paragraph.sentences.map((sentence) => ({

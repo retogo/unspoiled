@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { segmentArticle } from "./segment";
+import { sectionHeading, segmentArticle } from "./segment";
 import type { Lang } from "./wikipedia";
 
 function article(html: string, lang: Lang = "en") {
@@ -293,5 +293,21 @@ describe("segmentArticle", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("sectionHeading", () => {
+  it("names the lead for what it is, so it is not mistaken for a heading of the article", () => {
+    const result = article("<p>The film was released in 1999 and became a sleeper hit around the world.</p>");
+
+    expect(sectionHeading(result.sections[0])).toBe("Lead section");
+  });
+
+  it("gives every other section the heading the article wrote", () => {
+    const result = article(
+      "<p>The film was released in 1999 and became a sleeper hit around the world.</p><h2>Plot</h2><p>A boy who sees ghosts meets a child psychologist who tries to help him cope.</p>",
+    );
+
+    expect(sectionHeading(result.sections[1])).toBe("Plot");
   });
 });

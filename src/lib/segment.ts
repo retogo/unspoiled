@@ -358,6 +358,17 @@ export function isLead(section: Section): boolean {
   return section.heading === LEAD_HEADING;
 }
 
+/**
+ * What to call a section on screen and to an agent. The lead has no heading in the article, so it is
+ * named for the part of the article it is rather than given a heading Wikipedia never wrote.
+ */
+const LEAD_LABEL = "Lead section";
+
 export function sectionHeading(section: Section): string {
-  return isLead(section) ? "Overview" : section.heading;
+  return isLead(section) ? LEAD_LABEL : section.heading;
+}
+
+/** The ancestor headings of a section, the lead named the same way it is named everywhere else. */
+export function sectionHeadingPath(section: Section): string[] {
+  return isLead(section) ? [LEAD_LABEL] : section.headingPath;
 }
