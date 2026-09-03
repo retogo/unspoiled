@@ -72,5 +72,3 @@ at the root). The reader must work with no agent attached; the tools are an addi
   Japanese appears only as data: the heading and reveal-word rules in `risk.ts`, and test fixtures.
 - No comments about history ("previously", "fixed for review"); that belongs in git.
 - Commit messages are one imperative sentence stating the intent, as in `git log`.
-- The Devpost description and video script live outside the repo at
-  `~/obsidian-vault/webmcp-challenge-unspoiled.md`. Tool renames must be mirrored there.
