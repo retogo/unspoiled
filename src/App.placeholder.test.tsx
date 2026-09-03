@@ -4,9 +4,12 @@ import App from "./App";
 import { maskRows } from "./lib/mask";
 
 const ONE_LINE = "Malcolm Crowe is shot by a former patient in his own home.";
-const THREE_LINES = [
+const MANY_LINES = [
   "Malcolm meets Cole Sear, a frightened boy who tells him that he sees dead people walking around like ordinary people.",
   "Cole takes Malcolm's advice and listens to the ghosts who come to him, and helps a poisoned girl expose her mother.",
+  "Malcolm sits with Cole in the back of a car and tells him to speak to his mother about what he has been seeing.",
+  "Cole tells his mother that her own mother watched her dance, and that the answer to her question at the grave was yes.",
+  "Malcolm returns to the tape of Vincent Grey and hears a second voice on it, speaking a language he had not noticed.",
   "Malcolm goes home, sees his wedding ring on his wife's hand, and understands that he has been dead since the opening scene.",
 ];
 
@@ -14,7 +17,7 @@ const HTML = `<div class="mw-parser-output">
   <p>The Sixth Sense is a 1999 American supernatural thriller film written and directed by M. Night Shyamalan.</p>
   <h2>Plot</h2>
   <p>${ONE_LINE}</p>
-  <p>${THREE_LINES.join(" ")}</p>
+  <p>${MANY_LINES.join(" ")}</p>
 </div>`;
 
 vi.mock("./lib/wikipedia", () => ({
@@ -51,7 +54,7 @@ describe("the placeholder standing in for a withheld paragraph", () => {
 
     expect(placeholders().map((mask) => mask.textContent)).toEqual([
       `1 sentence withheld · ${ONE_LINE.length} chars · reveal`,
-      `3 sentences withheld · ${THREE_LINES.join("").length} chars · reveal`,
+      `6 sentences withheld · ${MANY_LINES.join("").length} chars · reveal`,
     ]);
   });
 
@@ -64,10 +67,13 @@ describe("the placeholder standing in for a withheld paragraph", () => {
   it("stands as tall as the text it withholds, so the band shows how much is behind it", async () => {
     await openArticle();
 
-    expect(placeholders().map((mask) => mask.style.minHeight)).toEqual([
+    const heights = placeholders().map((mask) => mask.style.minHeight);
+
+    expect(heights).toEqual([
       `${maskRows(ONE_LINE.length, "en") * 1.75}rem`,
-      `${maskRows(THREE_LINES.join("").length, "en") * 1.75}rem`,
+      `${maskRows(MANY_LINES.join("").length, "en") * 1.75}rem`,
     ]);
+    expect(heights[0]).not.toBe(heights[1]);
   });
 
   it("is filled like a withheld sentence rather than outlined like a drop target", async () => {
@@ -84,7 +90,7 @@ describe("the placeholder standing in for a withheld paragraph", () => {
 
     expect(placeholders().map((mask) => mask.getAttribute("aria-label"))).toEqual([
       `Reveal 1 sentence withheld, ${ONE_LINE.length} chars`,
-      `Reveal 3 sentences withheld, ${THREE_LINES.join("").length} chars`,
+      `Reveal 6 sentences withheld, ${MANY_LINES.join("").length} chars`,
     ]);
   });
 });
