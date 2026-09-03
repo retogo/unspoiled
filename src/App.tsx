@@ -281,12 +281,25 @@ export default function App() {
    */
   const followRef = useRef(false);
   useEffect(() => {
+    /*
+     * A reveal starts a word every twenty milliseconds, so several arrive between one frame and the
+     * next. Only the last of them can be the lowest on the page, so the page is measured and moved
+     * once a frame rather than once a word — one reading of the layout instead of dozens.
+     */
+    let arriving: HTMLElement | null = null;
+    const catchUp = () => {
+      const word = arriving;
+      arriving = null;
+      if (!word || !followRef.current) return;
+      const by = scrollToFollow(word.getBoundingClientRect().bottom, window.innerHeight, bottomInset());
+      if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+    };
     const follow = (event: Event) => {
       if (!followRef.current) return;
       const word = event.target;
       if (!(word instanceof HTMLElement) || !word.classList.contains("unspoiled-flow")) return;
-      const by = scrollToFollow(word.getBoundingClientRect().bottom, window.innerHeight, bottomInset());
-      if (by > 0) window.scrollBy({ top: by, behavior: "smooth" });
+      if (!arriving) requestAnimationFrame(catchUp);
+      arriving = word;
     };
     const release = () => {
       followRef.current = false;
@@ -306,6 +319,9 @@ export default function App() {
     };
   }, []);
 
+  /** Walking the article for every sentence is worth doing once, not once per reveal. */
+  const flowSource = useMemo(() => ({ runs: runsById(article), lang: article?.lang ?? "en" }), [article]);
+
   const revealedBefore = useRef(policy.revealed);
   /*
    * Runs before the browser paints: the sentences a reveal opens must be drawn as flowing words
@@ -318,9 +334,7 @@ export default function App() {
     const closed = [...before].filter((id) => !policy.revealed.has(id));
     if (opened.length === 0 && closed.length === 0) return;
     followRef.current = opened.length > 0;
-    const article = articleRef.current;
-    const runs = runsById(article);
-    const lang = article?.lang ?? "en";
+    const { runs, lang } = flowSource;
     setFlowing((current) => {
       const next = new Map(current);
       for (const id of closed) next.delete(id);
@@ -328,7 +342,7 @@ export default function App() {
       opened.forEach((id, order) => next.set(id, timings[order]));
       return next;
     });
-  }, [policy.revealed]);
+  }, [flowSource, policy.revealed]);
 
   return (
     <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
