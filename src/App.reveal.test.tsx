@@ -56,9 +56,9 @@ function articleText(): string {
   return screen.getByRole("article").textContent ?? "";
 }
 
-/** The sentences of the article the reader has opened, each with its control to close it again. */
+/** The sentences of the article the reader has opened. Each is itself the control that closes it. */
 function openedSentences(): HTMLElement[] {
-  return [...screen.getByRole("article").querySelectorAll<HTMLElement>("p span.group")];
+  return screen.queryAllByTitle("Hide this sentence again");
 }
 
 function delaysWithin(sentence: HTMLElement): string[] {
@@ -88,6 +88,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.getSelection()?.removeAllRanges();
   Reflect.deleteProperty(document, "modelContext");
 });
 
@@ -148,7 +149,7 @@ describe("hiding an opened sentence again", () => {
     await openArticle();
     await revealParagraph(2);
 
-    await userEvent.click(screen.getByRole("button", { name: "Hide this sentence again" }));
+    await userEvent.click(openedSentences()[0]);
 
     expect(document.body.textContent).not.toContain("been a ghost since the opening scene");
     expect(screen.getByRole("button", { name: `Reveal 1 sentence withheld, ${ENDING.length} chars` })).toBeTruthy();
@@ -169,7 +170,7 @@ describe("hiding an opened sentence again", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "Heading withheld · reveal" })[0]);
     expect(document.body.textContent).toContain("Ending explained");
 
-    await userEvent.click(screen.getByRole("button", { name: "Hide this heading again" }));
+    await userEvent.click(screen.getByTitle("Hide this heading again"));
 
     expect(document.body.textContent).not.toContain("Ending explained");
   });
@@ -177,7 +178,7 @@ describe("hiding an opened sentence again", () => {
   it("lets the sentence flow in again when the reader opens it a second time", async () => {
     await openArticle();
     await revealParagraph(2);
-    await userEvent.click(screen.getByRole("button", { name: "Hide this sentence again" }));
+    await userEvent.click(openedSentences()[0]);
 
     await revealParagraph(2);
 
@@ -193,7 +194,7 @@ describe("hiding an opened sentence again", () => {
     const staying = opened[1];
     const delays = delaysWithin(staying);
 
-    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+    await userEvent.click(opened[0]);
 
     expect(openedSentences()).toEqual([staying]);
     expect(delaysWithin(staying)).toEqual(delays);
@@ -205,7 +206,7 @@ describe("hiding an opened sentence again", () => {
     await userEvent.click(screen.getByRole("button", { name: "1 sentence withheld · reveal" }));
     const elsewhere = openedSentences()[2];
 
-    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+    await userEvent.click(openedSentences()[0]);
 
     expect(openedSentences()).toContain(elsewhere);
   });
@@ -215,7 +216,7 @@ describe("hiding an opened sentence again", () => {
     await revealParagraph(1);
     const standing = screen.getByRole("button", { name: "1 sentence withheld · reveal" });
 
-    await userEvent.click(screen.getAllByRole("button", { name: "Hide this sentence again" })[0]);
+    await userEvent.click(openedSentences()[0]);
 
     const chips = screen.getAllByRole("button", { name: "1 sentence withheld · reveal" });
     expect(chips).toHaveLength(2);
@@ -229,7 +230,7 @@ describe("hiding an opened sentence again", () => {
     const sentence = openedSentences()[0];
     const delays = delaysWithin(sentence);
 
-    await userEvent.click(screen.getByRole("button", { name: "Hide this heading again" }));
+    await userEvent.click(screen.getByTitle("Hide this heading again"));
 
     expect(openedSentences()).toEqual([sentence]);
     expect(delaysWithin(sentence)).toEqual(delays);
@@ -241,6 +242,68 @@ describe("hiding an opened sentence again", () => {
     fireEvent.change(screen.getByRole("slider"), { target: { value: "30" } });
 
     expect(articleText()).toContain(OPENING);
-    expect(screen.queryByRole("button", { name: "Hide this sentence again" })).toBeNull();
+    expect(openedSentences()).toHaveLength(0);
+  });
+});
+
+describe("closing an opened sentence with one tap on the sentence itself", () => {
+  it("costs no aim: the whole sentence is the control, and there is no small button to find", async () => {
+    await openArticle();
+    await revealParagraph(2);
+
+    expect(openedSentences()[0].textContent).toContain(ENDING);
+    expect(screen.queryByText("×")).toBeNull();
+  });
+
+  it("still reads the sentence out to anyone listening, rather than the name of the control", async () => {
+    await openArticle();
+    await revealParagraph(2);
+
+    expect(screen.getByRole("button", { name: ENDING })).toBe(openedSentences()[0]);
+  });
+
+  it("closes on Enter, for a reader who is not using a pointer", async () => {
+    await openArticle();
+    await revealParagraph(2);
+
+    openedSentences()[0].focus();
+    await userEvent.keyboard("{Enter}");
+
+    expect(document.body.textContent).not.toContain("been a ghost since the opening scene");
+  });
+
+  it("closes on Space as well", async () => {
+    await openArticle();
+    await revealParagraph(2);
+
+    openedSentences()[0].focus();
+    await userEvent.keyboard(" ");
+
+    expect(document.body.textContent).not.toContain("been a ghost since the opening scene");
+  });
+
+  it("leaves the sentence open when the reader was selecting text in it", async () => {
+    await openArticle();
+    await revealParagraph(2);
+    const sentence = openedSentences()[0];
+    window.getSelection()?.selectAllChildren(sentence.querySelectorAll(".unspoiled-flow")[1]);
+
+    fireEvent.click(sentence);
+
+    expect(articleText()).toContain(ENDING);
+  });
+
+  it("lets a link inside the sentence be followed instead of closing it", async () => {
+    await openArticle();
+    await revealParagraph(2);
+    const sentence = openedSentences()[0];
+    const link = document.createElement("a");
+    link.href = "#cole";
+    link.textContent = "Cole Sear";
+    sentence.append(link);
+
+    fireEvent.click(link, { bubbles: true });
+
+    expect(articleText()).toContain(ENDING);
   });
 });

@@ -700,12 +700,26 @@ function SectionView({
   );
 }
 
-/** The marker that says a run of text is on screen because the reader opened it, and can be closed again. */
-const OPENED = "underline decoration-dotted decoration-edge underline-offset-4";
+/**
+ * The marker that says a run of text is on screen because the reader opened it. Closing it again is
+ * something the reader wants done at once, so the text itself is the control rather than a target
+ * they have to aim at, and the underline is all the invitation it needs.
+ */
+const OPENED =
+  "cursor-pointer underline decoration-dotted decoration-edge underline-offset-4 hover:decoration-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
+
+/** A click that lands on a link, or that ends a drag over the text, is not a request to close it. */
+function closesOnClick(target: EventTarget | null): boolean {
+  if (target instanceof Element && target.closest("a")) return false;
+  return (window.getSelection()?.toString() ?? "") === "";
+}
 
 /**
  * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
- * arrives word by word and keeps a control to close it again.
+ * arrives word by word and closes again on a tap. That control is named for the sentence rather
+ * than for what it does, so a reader listening to the page still hears the prose it took a
+ * deliberate act to open — spelled out, because the words are separate elements while they arrive
+ * and a name read from those runs them together. What the control does is the description instead.
  */
 function SentenceView({
   sentence,
@@ -735,11 +749,27 @@ function SentenceView({
     );
   }
 
+  const close = () => onHide([sentence.id]);
   return (
-    <span className="group">
-      <span className={OPENED}>{body}</span>
-      <HideButton label={label} onClick={() => onHide([sentence.id])} />
-    </span>
+    <>
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label={sentence.text}
+        title={label}
+        onClick={(event) => {
+          if (closesOnClick(event.target)) close();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          close();
+        }}
+        className={OPENED}
+      >
+        {body}
+      </span>{" "}
+    </>
   );
 }
 
@@ -758,20 +788,6 @@ function FlowingText({ text, lang, start }: { text: string; lang: Lang; start: n
         </span>
       ))}
     </>
-  );
-}
-
-/** It stands where the space between sentences would be, so opening one barely moves the text. */
-function HideButton({ label, onClick }: { label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label={label}
-      title="Hide again"
-      className="inline-block w-2.5 rounded align-baseline text-center text-[11px] leading-none text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
-    >
-      ×
-    </button>
   );
 }
 
