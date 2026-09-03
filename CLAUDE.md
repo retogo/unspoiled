@@ -12,9 +12,9 @@ at the root). The reader must work with no agent attached; the tools are an addi
 - `npm run lint` (oxlint) is clean; keep it that way.
 - The React Compiler is on (`react({ compiler: true })`, which needs `oxc-transform-react`), so write
   components plainly and leave `memo` / `useMemo` / `useCallback` out unless a measurement asks for
-  one. It compiles every component except `App`, which it skips over the `try`/`finally` in `search`:
-  drop that `finally` and `App` compiles too. To see what it skipped, transform a file with
-  `transformSync(file, source, { reactCompiler: true, lang: "tsx" })` and read `errors`.
+  one. It currently compiles every component in `App.tsx`; it silently skips a component that reads
+  refs during render or uses `try`/`finally`, so check after such changes by transforming the file
+  with `transformSync(file, source, { reactCompiler: true, lang: "tsx" })` and reading `errors`.
 - Deploy: `vercel deploy --prod --yes --scope retogo`. Without `--scope` the CLI says "Not authorized".
 
 ## Invariants (the product claim; break one and the project is pointless)
