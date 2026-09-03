@@ -26,11 +26,21 @@ The division of labour is the point:
 Neither side can decide "what counts as a spoiler *for this reader*" alone. WebMCP is what joins
 them.
 
-And one property falls out of the tool surface itself: `get_visible_section_text` returns withheld sentences
-as placeholders, and `describe_withheld_content` returns their reasons and lengths but never their text.
-There is no tool that hands over the ending by default. `ask_about_article` searches only the
-sentences you are allowed to see, so an answer built from it cannot contain a spoiler. The agent is
-not asked to keep a secret — it is never given one.
+So Unspoiled is not a spoiler-free answer machine. It is a reading environment that your agent
+personalises: the agent applies what it knows about you to a full, navigable article, and the page
+enforces the result sentence by sentence.
+
+The promise the page makes is narrow and checkable: **it never transmits withheld text to your agent
+unless you open it.** `get_visible_section_text` returns withheld sentences as placeholders,
+`describe_withheld_content` returns their reasons, scores and lengths but never their text, and
+`ask_about_article` searches only the sentences visible on your screen, so it cannot repeat anything
+the page is still holding back. What the page cannot do is make a model forget an ending it learned
+in training, and once you reveal a sentence it is visible, to you and to the tools alike. Withholding
+is the default, not a vault.
+
+A bespoke backend and frontend could be built to do this. What WebMCP adds is that the live page
+exposes semantic operations over its own local state — this sentence, that section, this reader's
+policy — with no server integration and no screen-coordinate automation.
 
 ## One dial, not three settings
 
