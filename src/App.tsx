@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { flowDelay, flowPieces } from "./lib/flow";
 import {
   assessSection,
   countHidden,
@@ -59,6 +60,7 @@ export default function App() {
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
+  const [flowing, setFlowing] = useState<ReadonlyMap<string, number>>(new Map());
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
@@ -173,6 +175,26 @@ export default function App() {
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
 
+  /**
+   * Which sentences arrive a word at a time, and in what order they were opened. Opening one is a
+   * deliberate act — a button here, or a reveal tool — and worth watching arrive. The slider can
+   * open hundreds at once and never touches `revealed`, so those keep the plain fade.
+   */
+  const revealedBefore = useRef(policy.revealed);
+  useEffect(() => {
+    const before = revealedBefore.current;
+    revealedBefore.current = policy.revealed;
+    const opened = [...policy.revealed].filter((id) => !before.has(id));
+    const closed = [...before].filter((id) => !policy.revealed.has(id));
+    if (opened.length === 0 && closed.length === 0) return;
+    setFlowing((current) => {
+      const next = new Map(current);
+      for (const id of closed) next.delete(id);
+      opened.forEach((id, order) => next.set(id, order));
+      return next;
+    });
+  }, [policy.revealed]);
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <header className="border-b border-zinc-200 bg-white">
@@ -269,7 +291,14 @@ export default function App() {
                 </a>
               </p>
               {article.sections.map((section) => (
-                <SectionView key={section.id} section={section} policy={policy} onReveal={reveal} />
+                <SectionView
+                  key={section.id}
+                  section={section}
+                  policy={policy}
+                  lang={article.lang}
+                  flowing={flowing}
+                  onReveal={reveal}
+                />
               ))}
             </article>
           )}
@@ -400,10 +429,14 @@ export default function App() {
 function SectionView({
   section,
   policy,
+  lang,
+  flowing,
   onReveal,
 }: {
   section: Section;
   policy: Policy;
+  lang: Lang;
+  flowing: ReadonlyMap<string, number>;
   onReveal: (sentenceIds: string[]) => void;
 }) {
   const risk = assessSection(section);
@@ -414,11 +447,22 @@ function SectionView({
     0,
   );
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
+  const heading = (
+    <SectionHeading
+      section={section}
+      hidden={hidden}
+      known={known}
+      policy={policy}
+      lang={lang}
+      flowing={flowing}
+      onReveal={onReveal}
+    />
+  );
 
   if (allHidden) {
     return (
       <section className="mt-6">
-        <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
+        {heading}
         <p className="unspoiled-mask mt-2 text-xs text-zinc-500">
           {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
           open only as far as you have watched.
@@ -445,7 +489,7 @@ function SectionView({
 
   return (
     <section className="mt-6">
-      <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
+      {heading}
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
           {groups[index].map((run) =>
@@ -459,11 +503,14 @@ function SectionView({
                 {run.sentences.length === 1 ? "1 sentence" : `${run.sentences.length} sentences`} withheld · reveal
               </button>
             ) : (
-              /* One span per sentence, so only the sentences that just appeared animate in. */
+              /* One view per sentence, so only the sentences that just appeared animate in. */
               run.sentences.map((sentence) => (
-                <span key={sentence.id} className="unspoiled-text">
-                  {sentence.text}{" "}
-                </span>
+                <SentenceView
+                  key={sentence.id}
+                  sentence={sentence}
+                  lang={lang}
+                  order={flowing.get(sentence.id)}
+                />
               ))
             ),
           )}
@@ -473,32 +520,89 @@ function SectionView({
   );
 }
 
+/**
+ * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
+ * arrives word by word.
+ */
+function SentenceView({
+  sentence,
+  lang,
+  order,
+}: {
+  sentence: { id: string; text: string };
+  lang: Lang;
+  order: number | undefined;
+}) {
+  return (
+    <>
+      {order === undefined ? (
+        <span className="unspoiled-text">{sentence.text}</span>
+      ) : (
+        <FlowingText text={sentence.text} lang={lang} order={order} />
+      )}{" "}
+    </>
+  );
+}
+
+/** The words of an opened sentence, each set to arrive a beat after the one before it. */
+function FlowingText({ text, lang, order }: { text: string; lang: Lang; order: number }) {
+  const pieces = useMemo(() => flowPieces(text, lang), [lang, text]);
+  return (
+    <>
+      {pieces.map((piece, index) => (
+        <span
+          key={`${index}:${piece}`}
+          className="unspoiled-flow"
+          style={{ animationDelay: `${flowDelay(index, pieces.length, order)}ms` }}
+        >
+          {piece}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function SectionHeading({
   section,
   hidden,
   known,
   policy,
+  lang,
+  flowing,
   onReveal,
 }: {
   section: Section;
   hidden: number;
   known: string | null;
   policy: Policy;
+  lang: Lang;
+  flowing: ReadonlyMap<string, number>;
   onReveal: (ids: string[]) => void;
 }) {
   const withheldHeading = hiddenHeading(section, policy);
+  const id = headingId(section);
+  const heading = policy.revealed.has(id) ? (
+    <SentenceView
+      sentence={{ id, text: sectionHeading(section) }}
+      lang={lang}
+      order={flowing.get(id)}
+    />
+  ) : (
+    sectionHeading(section)
+  );
+
   return (
     <h3 className="flex flex-wrap items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
       {withheldHeading ? (
         <button
-          onClick={() => onReveal([headingId(section)])}
+          onClick={() => onReveal([id])}
           title={withheldHeading.reason}
           className="unspoiled-mask rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
         >
           Heading withheld · reveal
         </button>
       ) : (
-        sectionHeading(section)
+        heading
       )}
       {known ? (
         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">

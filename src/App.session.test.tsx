@@ -90,6 +90,11 @@ async function openArticle(registered: WebMcpTool[], language: Lang, title: stri
   return result;
 }
 
+/** A sentence the reader opened arrives a word at a time, so it is no longer one run of text. */
+function articleText(): string {
+  return screen.getByRole("article").textContent ?? "";
+}
+
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
   const promise = new Promise<T>((settle) => {
@@ -221,11 +226,11 @@ describe("opening another article", () => {
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "reveal_withheld_sentences", { sentence_ids: ["p2.0"] });
-    expect(screen.getByText(/Eren Yeager lives in a walled town/)).toBeTruthy();
+    expect(articleText()).toContain("Eren Yeager lives in a walled town");
 
     await openArticle(registered, "en", "Attack on Titan");
 
-    expect(screen.getByText(/Eren Yeager lives in a walled town/)).toBeTruthy();
+    expect(articleText()).toContain("Eren Yeager lives in a walled town");
   });
 });
 
