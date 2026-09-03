@@ -67,7 +67,7 @@ function isAscending(delays: number[]): boolean {
 }
 
 async function revealParagraph(which: number) {
-  await userEvent.click(screen.getByRole("button", { name: new RegExp(`Paragraph ${which}`) }));
+  await userEvent.click(screen.getAllByRole("button", { name: /^Reveal .* chars$/ })[which - 1]);
 }
 
 beforeEach(() => {
@@ -140,7 +140,7 @@ describe("hiding an opened sentence again", () => {
     await userEvent.click(screen.getByRole("button", { name: "Hide this sentence again" }));
 
     expect(document.body.textContent).not.toContain("been a ghost since the opening scene");
-    expect(screen.getByRole("button", { name: /Paragraph 2/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: `Reveal 1 sentence withheld, ${ENDING.length} chars` })).toBeTruthy();
   });
 
   it("offers one control for the sentences a paragraph opened together", async () => {
