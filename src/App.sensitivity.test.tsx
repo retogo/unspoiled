@@ -92,7 +92,7 @@ describe("the sensitivity slider", () => {
 
   it("shows where it stands and how much it is holding back", async () => {
     await openArticle();
-    expect(screen.getByText("Sensitivity 75")).toBeTruthy();
+    expect(screen.getByText("Sensitivity 65")).toBeTruthy();
     expect(screen.getByText("4 of 6 sentences withheld")).toBeTruthy();
 
     drag(30);
@@ -121,23 +121,51 @@ describe("the sensitivity slider", () => {
 });
 
 describe("the presets marked on the slider", () => {
+  const PRESETS: [string, string][] = [
+    ["Show everything", "0"],
+    ["Ending only", "20"],
+    ["Major spoilers", "45"],
+    ["Spoiler-safe", "65"],
+    ["Maximum protection", "100"],
+  ];
+
+  it("starts the reader on the one that withholds a plot summary whole", async () => {
+    await openArticle();
+
+    expect(slider().value).toBe("65");
+  });
+
   it("jumps to the value each one stands for", async () => {
     await openArticle();
 
-    await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
-    expect(slider().value).toBe("50");
-
-    await userEvent.click(screen.getByRole("button", { name: /Open/ }));
-    expect(slider().value).toBe("0");
-
-    await userEvent.click(screen.getByRole("button", { name: /Strict/ }));
-    expect(slider().value).toBe("75");
+    for (const [label, value] of PRESETS) {
+      await userEvent.click(screen.getByRole("button", { name: label }));
+      expect(slider().value).toBe(value);
+    }
   });
 
-  it("shows the whole article at Open", async () => {
+  it("says what the one the reader has picked withholds", async () => {
     await openArticle();
 
-    await userEvent.click(screen.getByRole("button", { name: /Open/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Ending only" }));
+    expect(screen.getByText("Hides the final scene, who dies, who did it.")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Maximum protection" }));
+    expect(screen.getByText("Hides anything the page finds even slightly suspicious.")).toBeTruthy();
+  });
+
+  it("reads as the strongest preset it has passed when the slider sits between two", async () => {
+    await openArticle();
+
+    drag(30);
+
+    expect(screen.getByText("Hides the final scene, who dies, who did it.")).toBeTruthy();
+  });
+
+  it("shows the whole article at the open end of the scale", async () => {
+    await openArticle();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show everything" }));
 
     expect(screen.getByText(ENDING)).toBeTruthy();
     expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("0");

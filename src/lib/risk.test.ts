@@ -186,8 +186,8 @@ describe("the presets on the slider", () => {
     expect(hiddenSentence(firstSentence(hint), hint, at(0))).toBe(false);
   });
 
-  it("starts the reader at seventy-five", () => {
-    expect(newPolicy().sensitivity).toBe(75);
+  it("starts the reader where a plot summary is withheld whole", () => {
+    expect(newPolicy().sensitivity).toBe(65);
   });
 });
 

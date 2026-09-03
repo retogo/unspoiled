@@ -65,11 +65,33 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 
 const SENSITIVITY_KEY = "unspoiled.sensitivity";
 
-/** Three points on the scale worth a name, marked where they fall along the slider. */
+/**
+ * Five points on the scale worth a name, marked where they fall along the slider. Each name says
+ * what it takes off the screen rather than how strict it is: a reader knows whether they want the
+ * ending kept from them, not whether they want the dial at seventy.
+ */
 const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
-  { sensitivity: 0, label: "Open", hint: "Withhold nothing the page has not been told to withhold" },
-  { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
-  { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
+  {
+    sensitivity: 0,
+    label: "Show everything",
+    hint: "The page hides nothing on its own. Your agent's decisions and your rules still apply.",
+  },
+  { sensitivity: 20, label: "Ending only", hint: "Hides the final scene, who dies, who did it." },
+  {
+    sensitivity: 45,
+    label: "Major spoilers",
+    hint: "Hides endings, deaths, identities, winners and major reveals.",
+  },
+  {
+    sensitivity: 65,
+    label: "Spoiler-safe",
+    hint: "Hides whole plot summaries, analysis, and wording that hints at the ending.",
+  },
+  {
+    sensitivity: 100,
+    label: "Maximum protection",
+    hint: "Hides anything the page finds even slightly suspicious.",
+  },
 ];
 
 /** Which Wikipedia to search. The pair sits inside the field: a search is a term and an edition. */
@@ -84,12 +106,13 @@ const THEMES: { choice: ThemeChoice; label: string }[] = [
   { choice: "system", label: "System" },
 ];
 
+/**
+ * What the slider is doing, in the words of the strongest named point it has reached. A value
+ * between two presets is at least as protective as the one below it, so that is the one it reads as.
+ */
 function sensitivityHint(sensitivity: number): string {
-  if (sensitivity === 0) return "The page withholds nothing. Your agent's decisions still stand.";
-  if (sensitivity < 25) return "Withholds how each plot summary ends.";
-  if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
-  if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
-  return "Withholds plot summaries, analysis, and any wording that hints at the ending.";
+  const reached = SENSITIVITY_PRESETS.filter((preset) => preset.sensitivity <= sensitivity);
+  return reached[reached.length - 1].hint;
 }
 
 /**
@@ -451,22 +474,31 @@ export default function App() {
                 style={{ "--sensitivity-fill": `${policy.sensitivity}%` } as CSSProperties}
                 className="sensitivity mt-2.5 w-full"
               />
-              <div className="relative mt-0.5 mb-1 hidden h-8 lg:block">
-                {SENSITIVITY_PRESETS.map((preset) => (
+              {/*
+                Five names do not fit across one line of the sidebar, so every other one hangs from
+                a longer stem onto a second line. The stem is what carries the name to its point on
+                the scale, and the ends of the scale hang their names inwards to stay on the panel.
+              */}
+              <div className="relative mt-0.5 mb-1 hidden h-10 lg:block">
+                {SENSITIVITY_PRESETS.map((preset, index) => (
                   <button
                     key={preset.label}
                     onClick={() => chooseSensitivity(preset.sensitivity)}
                     title={preset.hint}
                     style={{ left: `${preset.sensitivity}%` }}
-                    className={`absolute top-0 flex flex-col items-center gap-1 text-[11px] ${
-                      preset.sensitivity === 0 ? "" : "-translate-x-1/2"
+                    className={`absolute top-0 flex flex-col gap-1 whitespace-nowrap text-[11px] ${
+                      index === 0
+                        ? "items-start"
+                        : index === SENSITIVITY_PRESETS.length - 1
+                          ? "-translate-x-full items-end"
+                          : "-translate-x-1/2 items-center"
                     } ${
                       policy.sensitivity === preset.sensitivity
                         ? "font-medium text-ink"
                         : "text-muted hover:text-ink"
                     }`}
                   >
-                    <span className="h-1.5 w-px bg-edge" />
+                    <span className={`w-px bg-edge ${index % 2 === 1 ? "h-5" : "h-1.5"}`} />
                     {preset.label}
                   </button>
                 ))}

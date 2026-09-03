@@ -198,11 +198,11 @@ describe("opening another article", () => {
     const registered = await renderWithAgent();
     await openArticle(registered, "en", "Attack on Titan");
 
-    await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Major spoilers" }));
     await openArticle(registered, "en", "The Sixth Sense");
 
     const report = await callTool(registered, "get_masking_report");
-    expect(report.sensitivity).toBe(50);
+    expect(report.sensitivity).toBe(45);
   });
 
   it("keeps what the reader has opened when the same article is opened again", async () => {
@@ -502,8 +502,8 @@ describe("the reader's sensitivity", () => {
   it("is stored when the reader picks a preset", async () => {
     await renderWithAgent();
 
-    await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Major spoilers" }));
 
-    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("50");
+    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("45");
   });
 });

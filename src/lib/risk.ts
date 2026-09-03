@@ -156,7 +156,7 @@ export type Policy = {
   decisions: Decision[];
 };
 
-export const DEFAULT_SENSITIVITY = 75;
+export const DEFAULT_SENSITIVITY = 65;
 
 export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY): Policy {
   return { sensitivity, shown: new Set(), hidden: new Set(), decisions: [] };
