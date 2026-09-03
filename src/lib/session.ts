@@ -86,10 +86,14 @@ function isSameArticle(open: Article | null, opened: Article): boolean {
  * the article it was collected in. Opening a different article drops them all —
  * keeping them would hide unrelated sentences and, worse, unhide sections of the
  * new article that the reader never said they knew.
+ *
+ * The log of what the agent decided is not one of those: it is the record of
+ * this session, the only complete one the reader has, and an article they have
+ * finished reading is no reason to lose what was decided while they read it.
  */
 export function policyForOpened(policy: Policy, open: Article | null, opened: Article): Policy {
   if (isSameArticle(open, opened)) return policy;
-  return newPolicy(policy.sensitivity);
+  return { ...newPolicy(policy.sensitivity), decisions: policy.decisions };
 }
 
 export function scannedForArticle(scanned: ScannedSection[], article: Article | null): string[] {

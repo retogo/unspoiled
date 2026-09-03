@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
+import { DEFAULT_SENSITIVITY, type Policy } from "./risk";
 import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
@@ -86,7 +86,13 @@ describe("readSessionStart", () => {
 describe("policyForOpened", () => {
   it("clears everything tied to the previous article's sentence ids", () => {
     const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
-    expect(next).toEqual(newPolicy(50));
+    expect(next.shown.size).toBe(0);
+    expect(next.hidden.size).toBe(0);
+  });
+
+  it("keeps the log of what the agent decided, which is a record of the session and not of one article", () => {
+    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
+    expect(next.decisions).toEqual(usedPolicy.decisions);
   });
 
   it("keeps the reader's sensitivity, which is not tied to any article", () => {

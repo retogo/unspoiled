@@ -176,7 +176,10 @@ describe("opening another article", () => {
     await openArticle(registered, "en", "The Sixth Sense");
 
     expect(screen.queryByText(/Malcolm Crowe has been a ghost/)).toBeNull();
-    expect(screen.queryByText("you have finished season 1")).toBeNull();
+    expect(articleText()).not.toContain("you have finished season 1");
+    /* The decision no longer applies here, but having made it is a fact about the session. */
+    const decided = screen.getByRole("heading", { name: "Decisions" }).parentElement?.textContent ?? "";
+    expect(decided).toContain("you have finished season 1");
   });
 
   it("does not let sentences hidden in one article hide sentences in the next", async () => {

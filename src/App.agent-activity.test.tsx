@@ -183,7 +183,7 @@ describe("a decision announcing itself as it lands", () => {
     expect(notice()).toContain("you have watched the first act");
   });
 
-  it("goes away after six seconds", async () => {
+  it("stays a good while, and then goes", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { call } = await readerWithAgent();
     await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
@@ -191,7 +191,52 @@ describe("a decision announcing itself as it lands", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
+    expect(notice()).toContain("Your agent showed 1 sentence and hid 0");
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(notice()).toBe("");
+  });
+
+  it("waits while the reader has the pointer on it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { call } = await readerWithAgent();
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+
+    const held = screen.getByRole("button", { name: /Your agent showed/ });
+    await user.hover(held);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(notice()).toContain("Your agent showed 1 sentence and hid 0");
+
+    await user.unhover(held);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12000);
+    });
+    expect(notice()).toBe("");
+  });
+
+  it("waits while it holds the focus, so a reader on the keyboard can read it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { call } = await readerWithAgent();
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+
+    const held = screen.getByRole("button", { name: /Your agent showed/ });
+    await act(async () => {
+      held.focus();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20000);
+    });
+    expect(notice()).toContain("Your agent showed 1 sentence and hid 0");
+
+    await act(async () => {
+      held.blur();
+      await vi.advanceTimersByTimeAsync(12000);
+    });
     expect(notice()).toBe("");
   });
 
@@ -263,6 +308,30 @@ describe("the activity drawer under the article", () => {
     const calls = screen.getByRole("heading", { name: "Tool calls" }).parentElement?.textContent ?? "";
     expect(calls).toContain("read_article_content");
     expect(calls).toContain("error");
+  });
+
+  it("keeps a decision that reached nothing, rather than letting it pass in silence", async () => {
+    const { call } = await readerWithAgent();
+
+    await call("apply_mask", { hide: { sentence_ids: ["p9.9"] }, reason: "you asked not to know the ending" });
+
+    const rows = screen.getByRole("heading", { name: "Decisions" }).parentElement?.querySelectorAll("li");
+    expect(rows?.[0].textContent).toContain("0 shown · 0 hidden");
+    expect(rows?.[0].textContent).toContain("you asked not to know the ending");
+  });
+
+  it("holds every decision of the session, in order, once the reader has moved on", async () => {
+    const { call, open } = await readerWithAgent();
+    await call("apply_mask", { show: { sentence_ids: ["p1.0"] }, reason: "you have watched the first act" });
+
+    await open("Another Film");
+    await call("apply_mask", { hide: { sentence_ids: ["p1.1"] }, reason: "you asked not to know the courier's errand" });
+
+    const rows = screen.getByRole("heading", { name: "Decisions" }).parentElement?.querySelectorAll("li");
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0].textContent).toContain("you asked not to know the courier's errand");
+    expect(rows?.[1].textContent).toContain("you have watched the first act");
+    expect(screen.getByText(/^Agent activity · 2 decisions/)).toBeTruthy();
   });
 
   it("is not there before an article is open", async () => {

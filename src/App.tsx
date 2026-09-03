@@ -137,7 +137,7 @@ function maskSummary(decision: Decision): string {
 }
 
 /** Long enough to read a reason, short enough that the reader is not made to dismiss it. */
-const NOTICE_MS = 6000;
+const NOTICE_MS = 12000;
 
 export default function App() {
   const [start] = useState(() =>
@@ -154,6 +154,7 @@ export default function App() {
   const [flowing, setFlowing] = useState<ReadonlyMap<string, FlowTiming>>(new Map());
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
   const [notice, setNotice] = useState<Decision | null>(null);
+  const [reading, setReading] = useState(false);
 
   /*
    * The tools are handed to the browser once, on mount, and are called long afterwards, so they read
@@ -312,14 +313,16 @@ export default function App() {
     setNotice(policy.decisions.at(-1) ?? null);
   }, [policy.decisions]);
 
+  /* A reader who has reached for the notice is reading it, and nothing is taken away mid-sentence. */
   useEffect(() => {
-    if (!notice) return;
+    if (!notice || reading) return;
     const fade = window.setTimeout(() => setNotice(null), NOTICE_MS);
     return () => window.clearTimeout(fade);
-  }, [notice]);
+  }, [notice, reading]);
 
   const openActivity = useCallback(() => {
     setNotice(null);
+    setReading(false);
     const drawer = activityRef.current;
     if (!drawer) return;
     drawer.open = true;
@@ -598,6 +601,10 @@ export default function App() {
         {notice && (
           <button
             onClick={openActivity}
+            onMouseEnter={() => setReading(true)}
+            onMouseLeave={() => setReading(false)}
+            onFocus={() => setReading(true)}
+            onBlur={() => setReading(false)}
             className="unspoiled-mask pointer-events-auto w-full rounded-lg border border-line bg-surface px-3 py-2 text-left text-xs shadow-lg"
           >
             <span className="block font-medium">{maskSummary(notice)}</span>
