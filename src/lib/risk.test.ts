@@ -73,9 +73,21 @@ describe("section headings", () => {
   it.each(["Ending themes", "Storyboarding", "Character design", "Theme song", "テーマソング", "主題歌"])(
     "does not treat %s as a spoiler section",
     (heading) => {
-      expect(assessSection(section(heading)).level).toBe("safe");
+      expect(assessSection(section(heading)).level).not.toBe("spoiler");
     },
   );
+
+  it.each(["Production", "Release", "Box office", "受賞"])("vouches for %s as safe", (heading) => {
+    expect(assessSection(section(heading))).toMatchObject({ level: "safe", risk: 0 });
+  });
+
+  it("holds back a section it can neither read as narrative nor vouch for", () => {
+    expect(assessSection(section("Merchandise"))).toMatchObject({ level: "suspect", risk: 20 });
+  });
+
+  it("holds back the lead, which sums up the ending along with everything else", () => {
+    expect(assessSection(section("(lead)"))).toMatchObject({ level: "suspect", risk: 20 });
+  });
 });
 
 describe("reveal wording", () => {
@@ -100,7 +112,7 @@ describe("how a sentence is scored", () => {
       "He accepts what has happened and moves on.",
     ]);
     const scores = [0, 1, 2, 3, 4].map((index) => assessmentAt(plot, index).risk);
-    expect(scores).toEqual([60, 70, 80, 90, 100]);
+    expect(scores).toEqual([40, 55, 70, 85, 100]);
   });
 
   it("scores a plot section of one sentence as the ending itself", () => {
@@ -117,19 +129,25 @@ describe("how a sentence is scored", () => {
     expect(assessmentAt(themes, 1).risk).toBe(70);
   });
 
-  it("scores a sentence that states the reveal outright as a near certainty", () => {
-    const target = section("Reception", ["Reviewers dwelt on the twist, that the narrator and Tyler are one man."]);
-    expect(assessmentAt(target)).toMatchObject({ level: "spoiler", risk: 85 });
+  it("scores a sentence for the kind of spoiler its wording carries", () => {
+    const target = section("Reception", ["Reviewers dwelt on the scene in which the psychologist dies."]);
+    expect(assessmentAt(target)).toMatchObject({ level: "spoiler", risk: 90, category: "death" });
   });
 
-  it("scores a weaker hint well below an outright reveal", () => {
+  it("scores wording that only leans towards the ending far below one that states it", () => {
     const target = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
-    expect(assessmentAt(target)).toMatchObject({ level: "suspect", risk: 40 });
+    expect(assessmentAt(target)).toMatchObject({ level: "suspect", risk: 40, category: "hint" });
   });
 
-  it("raises an analysis sentence that also states the reveal outright", () => {
-    const target = section("Themes", ["The twist is what the film is finally about."]);
-    expect(assessmentAt(target).risk).toBe(85);
+  it("raises an analysis sentence whose wording gives away more than the section does", () => {
+    const target = section("Themes", ["Critics read the film through the mother, who dies in the first act."]);
+    expect(assessmentAt(target)).toMatchObject({ risk: 90, category: "death" });
+  });
+
+  it("keeps the section's score where the wording gives away less", () => {
+    const target = section("Themes", ["Critics dwelt on the ending as a study of grief."]);
+    expect(assessmentAt(target).risk).toBe(70);
+    expect(assessmentAt(target).category).toBeUndefined();
   });
 
   it("keeps the higher score when a plot sentence also hints at the ending", () => {
@@ -167,23 +185,71 @@ describe("the sensitivity threshold", () => {
 });
 
 describe("the presets on the slider", () => {
-  const reveal = section("Reception", ["Reviewers dwelt on the twist, that the narrator and Tyler are one man."]);
+  const death = section("Reception", ["Reviewers dwelt on the scene in which the psychologist dies."]);
+  const outcome = section("Reception", ["In the end the narrator wins the argument with himself."]);
+  const ending = section("Reception", ["The epilogue drew the most comment."]);
   const hint = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
-  const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
 
-  it("withholds plot summaries and outright reveals at fifty, but not weaker hints", () => {
-    expect(hiddenSentence(firstSentence(plot), plot, at(50))).toBe(true);
-    expect(hiddenSentence(firstSentence(reveal), reveal, at(50))).toBe(true);
-    expect(hiddenSentence(firstSentence(hint), hint, at(50))).toBe(false);
-  });
+  const article = {
+    lang: "en" as const,
+    title: "The Sixth Sense",
+    displayTitle: "The Sixth Sense",
+    sourceUrl: "https://en.wikipedia.org/wiki/The_Sixth_Sense",
+    references: [],
+    sections: [
+      section("Production", ["The film was shot on location over eleven weeks."]),
+      {
+        ...section("Plot", [
+          "A boy who sees ghosts meets a child psychologist.",
+          "They meet again through the winter.",
+          "The boy tells his mother what he sees.",
+          "The psychologist goes home for the last time.",
+          "He accepts what has happened and moves on.",
+        ]),
+        id: "s2",
+      },
+      {
+        ...section("Reception", [
+          "Reviewers dwelt on the scene in which the psychologist dies.",
+          "In the end the narrator wins the argument with himself.",
+          "The epilogue drew the most comment.",
+          "Reviewers praised the ending as the strongest part of the film.",
+        ]),
+        id: "s3",
+      },
+      { ...section("Merchandise", ["A tie-in card game followed in 2001."]), id: "s4" },
+    ],
+  };
 
-  it("withholds the weaker hint too at seventy-five", () => {
-    expect(hiddenSentence(firstSentence(hint), hint, at(75))).toBe(true);
-  });
-
-  it("withholds nothing at zero", () => {
-    expect(hiddenSentence(firstSentence(reveal), reveal, at(0))).toBe(false);
+  it("withholds nothing at all where the reader asked for everything", () => {
+    expect(hiddenSentence(firstSentence(death), death, at(0))).toBe(false);
     expect(hiddenSentence(firstSentence(hint), hint, at(0))).toBe(false);
+  });
+
+  it("withholds who dies but not how it turns out where only the ending is withheld", () => {
+    expect(hiddenSentence(firstSentence(death), death, at(20))).toBe(true);
+    expect(hiddenSentence(firstSentence(outcome), outcome, at(20))).toBe(false);
+  });
+
+  it("withholds how it turns out, but not the closing scenes, at the major-spoiler point", () => {
+    expect(hiddenSentence(firstSentence(outcome), outcome, at(45))).toBe(true);
+    expect(hiddenSentence(firstSentence(ending), ending, at(45))).toBe(false);
+  });
+
+  it("withholds the closing scenes and wording that only hints, at the spoiler-safe point", () => {
+    expect(hiddenSentence(firstSentence(ending), ending, at(65))).toBe(true);
+    expect(hiddenSentence(firstSentence(hint), hint, at(65))).toBe(true);
+  });
+
+  it("withholds a section it cannot vouch for only at the strongest point", () => {
+    const unvouched = section("Merchandise", ["A tie-in card game followed in 2001."]);
+    expect(hiddenSentence(firstSentence(unvouched), unvouched, at(65))).toBe(false);
+    expect(hiddenSentence(firstSentence(unvouched), unvouched, at(100))).toBe(true);
+  });
+
+  it("withholds strictly more of an article at each named point", () => {
+    const withheld = [0, 20, 45, 65, 100].map((sensitivity) => countHidden(article, newPolicy(sensitivity)).hidden);
+    expect(withheld).toEqual([0, 3, 5, 9, 10]);
   });
 
   it("starts the reader where a plot summary is withheld whole", () => {

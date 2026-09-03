@@ -1,3 +1,4 @@
+import { strongestCategory, type SpoilerCategory } from "./categories";
 import type { Article, Section, Sentence } from "./segment";
 import { isLead } from "./segment";
 
@@ -6,20 +7,37 @@ export type RiskLevel = "safe" | "suspect" | "spoiler";
 /**
  * `risk` is how much of the ending this text gives away, from 0 to 100. It is compared against the
  * reader's threshold; `level` and `reason` say the same thing in words, for the screen and for the
- * agent.
+ * agent. `category` is the kind of spoiler the wording carries, where the wording is what decided
+ * the score, and is the page's own bookkeeping: no tool reports it and no placeholder shows it.
  */
 export type Assessment = {
   level: RiskLevel;
   risk: number;
   reason: string;
+  category?: SpoilerCategory;
 };
 
 const CERTAIN = 100;
-const NARRATIVE_OPENING = 60;
+const NARRATIVE_OPENING = 40;
 const ANALYSIS = 70;
-const OUTRIGHT_REVEAL = 85;
-const HINT = 40;
+/**
+ * A section the heading rules can neither call narrative nor vouch for as production or
+ * publication, and the lead, which is where an article states the ending in passing. Neither is
+ * withheld until the reader asks for the most protection there is.
+ */
+const UNVOUCHED = 20;
 const NOTHING = 0;
+
+/**
+ * The lowest weight any kind of spoiler carries. Anything at or above it states something about
+ * the story; anything below it only leans that way, which is what "suspect" is for.
+ */
+const SPOILER = 55;
+
+function levelFor(risk: number): RiskLevel {
+  if (risk === NOTHING) return "safe";
+  return risk < SPOILER ? "suspect" : "spoiler";
+}
 
 const HEADING_TAIL = String.raw`(?:\s*[([:：（〔・\-–—/].*)?$`;
 
@@ -39,12 +57,6 @@ const META_SECTIONS = headingRule(
   "production|development|casting|filming|music|soundtrack|release|home media|reception|box office|critical response|critical reception|accolades|awards|legacy|references|external links|see also|製作|制作|公開|評価|受賞|脚注|関連項目|外部リンク|キャスト|主題歌",
 );
 
-const STRONG_REVEAL_MARKERS =
-  /\btwists?\b|\bturns out\b|\bis revealed (to|as|that)\b|\bis actually\b|\bwas actually\b|\bthe killer\b|\bthe murderer\b|\bthe culprit\b|\bfinal (scene|episode|act|twist)\b|\bdies\b|\bis killed\b|\bkills (himself|herself)\b|\bcommits suicide\b|実は|正体|真犯人|自殺|殺され|裏切/i;
-
-const WEAK_REVEAL_MARKERS =
-  /\breveal|\bbetray|\bresurrect|\bin the end\b|\bfinale\b|\bdeath of\b|\bfate of\b|\bending\b|\bclimax\b|\bepilogue\b|結末|最終回|最終話|死ぬ|死亡/i;
-
 function isNarrative(section: Section): boolean {
   return section.headingPath.some((heading) => NARRATIVE_SECTIONS.test(heading));
 }
@@ -61,60 +73,50 @@ export function assessSection(section: Section): Assessment {
     return { level: "spoiler", risk: ANALYSIS, reason: "analysis sections discuss the ending" };
   }
   if (isLead(section)) {
-    return { level: "safe", risk: NOTHING, reason: "lead section, checked sentence by sentence" };
+    return { level: levelFor(UNVOUCHED), risk: UNVOUCHED, reason: "the lead, which sums up the ending too" };
   }
   if (META_SECTIONS.test(section.heading)) {
     return { level: "safe", risk: NOTHING, reason: "a production or publication section" };
   }
-  return { level: "safe", risk: NOTHING, reason: "checked sentence by sentence" };
-}
-
-function higher(base: Assessment, marker: Assessment): Assessment {
-  return marker.risk > base.risk ? marker : base;
+  return { level: levelFor(UNVOUCHED), risk: UNVOUCHED, reason: "a section the page cannot vouch for" };
 }
 
 /**
  * A plot summary runs in the order the story does, so a sentence is scored by how far into the
  * section it sits: the opening is the safest thing in it and the last sentence is the ending. That
- * is what lets the reader lower their threshold and have the story open from the front.
+ * is what lets the reader lower their threshold and have the story open from the front, and the
+ * span it runs over is what gives the named points on the scale something to divide.
  */
 function baseline(section: Section, position: number, count: number): Assessment {
   if (isNarrative(section)) {
     const through = count > 1 ? position / (count - 1) : 1;
-    return {
-      level: "spoiler",
-      risk: Math.round(NARRATIVE_OPENING + (CERTAIN - NARRATIVE_OPENING) * through),
-      reason: "plot summaries state the ending",
-    };
+    const risk = Math.round(NARRATIVE_OPENING + (CERTAIN - NARRATIVE_OPENING) * through);
+    return { level: levelFor(risk), risk, reason: "plot summaries state the ending" };
   }
-  if (isAnalysis(section)) {
-    return { level: "spoiler", risk: ANALYSIS, reason: "analysis sections discuss the ending" };
-  }
-  return { level: "safe", risk: NOTHING, reason: assessSection(section).reason };
+  return assessSection(section);
 }
 
+/**
+ * A sentence is worth whichever gives more away: where it sits in its section, or the kind of
+ * spoiler its own wording carries. Taking the higher of the two is what lets a death in a
+ * production section be withheld while the opening line of a plot summary is not.
+ */
 function assessAll(section: Section): Map<string, Assessment> {
   const sentences = section.paragraphs.flatMap((paragraph) => paragraph.sentences);
   return new Map(
     sentences.map((sentence, position) => {
       const base = baseline(section, position, sentences.length);
-      if (STRONG_REVEAL_MARKERS.test(sentence.text)) {
-        return [
-          sentence.id,
-          higher(base, {
-            level: "spoiler",
-            risk: OUTRIGHT_REVEAL,
-            reason: "a sentence that states the reveal outright",
-          }),
-        ];
-      }
-      if (WEAK_REVEAL_MARKERS.test(sentence.text)) {
-        return [
-          sentence.id,
-          higher(base, { level: "suspect", risk: HINT, reason: "wording that hints at the ending" }),
-        ];
-      }
-      return [sentence.id, base];
+      const wording = strongestCategory(sentence.text);
+      if (!wording || wording.weight <= base.risk) return [sentence.id, base];
+      return [
+        sentence.id,
+        {
+          level: levelFor(wording.weight),
+          risk: wording.weight,
+          reason: wording.reason,
+          category: wording.category,
+        },
+      ];
     }),
   );
 }

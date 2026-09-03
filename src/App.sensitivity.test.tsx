@@ -23,7 +23,7 @@ vi.mock("./lib/wikipedia", () => ({
   searchArticles: async () => [],
 }));
 
-/** The plot runs in order, so these four are scored 60, 73, 87 and 100. */
+/** The plot runs in order, so these four are scored 40, 60, 80 and 100. */
 const OPENING = /Malcolm Crowe is shot/;
 const SECOND = /Malcolm meets Cole Sear/;
 const ENDING = /he has been a ghost/;
@@ -98,7 +98,7 @@ describe("the sensitivity slider", () => {
     drag(30);
 
     expect(screen.getByText("Sensitivity 30")).toBeTruthy();
-    expect(screen.getByText("3 of 6 sentences withheld")).toBeTruthy();
+    expect(screen.getByText("2 of 6 sentences withheld")).toBeTruthy();
   });
 
   it("counts what each section is holding back, next to its heading", async () => {
@@ -107,7 +107,7 @@ describe("the sensitivity slider", () => {
 
     drag(30);
 
-    expect(screen.getByText("3 withheld")).toBeTruthy();
+    expect(screen.getByText("2 withheld")).toBeTruthy();
   });
 
   it("remembers where the reader left it", async () => {
