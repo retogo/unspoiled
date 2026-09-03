@@ -43,6 +43,11 @@ at the root). The reader must work with no agent attached; the tools are an addi
 - Tool arguments arrive as a JSON string and whatever `execute` returns is JSON-stringified.
   Return `{ content: [{ type: "text", text }] }` and `isError: true` on failure. Image or other
   content types never reach the model.
+- There is no `unregisterTool`, and registering a name the page already holds rejects with
+  `InvalidStateError: Duplicate tool name`. `registerTools` is therefore idempotent: it hands a
+  name to the browser at most once and treats a duplicate as already exposed. The handler the
+  browser keeps looks its definition up on every call, so React's double mount in development
+  does not leave a stale one behind.
 - A page cannot detect an attached agent or call one. Every flow starts with the human.
 - Testing: `chrome://flags` → search `mcp` → enable → relaunch. DevTools has an Application →
   WebMCP panel. ChatGPT's in-app browser also supports it.
