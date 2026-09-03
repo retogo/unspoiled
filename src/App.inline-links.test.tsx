@@ -112,7 +112,7 @@ describe("a sentence the reader opens", () => {
   it("keeps its links, and its words still arrive in order across them", async () => {
     await openArticle();
 
-    await userEvent.click(screen.getByRole("button", { name: /Paragraph 1/ }));
+    await userEvent.click(screen.getAllByRole("button", { name: /^Reveal .* chars$/ })[0]);
 
     const opened = await waitFor(() =>
       screen.getByRole("article").querySelector<HTMLAnchorElement>('a[href="?lang=en&title=Cole+Sear"]'),
