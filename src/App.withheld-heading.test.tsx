@@ -14,7 +14,6 @@ vi.mock("./lib/wikipedia", () => ({
     title: "Test",
     displayTitle: "Test article",
     sourceUrl: "https://en.wikipedia.org/wiki/Test",
-    sections: [],
     html: HTML,
   }),
   searchArticles: async () => [],

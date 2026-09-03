@@ -1,18 +1,10 @@
 export type Lang = "en" | "ja";
 
-export type RawSection = {
-  index: string;
-  level: number;
-  line: string;
-  anchor: string;
-};
-
 export type FetchedArticle = {
   lang: Lang;
   title: string;
   displayTitle: string;
   sourceUrl: string;
-  sections: RawSection[];
   html: string;
 };
 
@@ -55,14 +47,13 @@ export async function fetchArticle(lang: Lang, title: string): Promise<FetchedAr
     parse: {
       title: string;
       displaytitle: string;
-      sections: RawSection[];
       text: { "*": string };
     };
   };
   const payload = await callApi<Response>(lang, {
     action: "parse",
     page: title,
-    prop: "text|sections|displaytitle",
+    prop: "text|displaytitle",
     redirects: "1",
     disableeditsection: "1",
     disabletoc: "1",
@@ -73,7 +64,6 @@ export async function fetchArticle(lang: Lang, title: string): Promise<FetchedAr
     title: parsed.title,
     displayTitle: parsed.displaytitle.replace(/<[^>]+>/g, ""),
     sourceUrl: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(parsed.title.replace(/ /g, "_"))}`,
-    sections: parsed.sections,
     html: parsed.text["*"],
   };
 }
