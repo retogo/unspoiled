@@ -30,7 +30,9 @@ import {
   type Sentence,
 } from "./lib/segment";
 import {
+  historyActionFor,
   policyForOpened,
+  readArticleTarget,
   readSessionStart,
   recordScanned,
   revealedOnPage,
@@ -38,6 +40,7 @@ import {
   scannedForArticle,
   type ScannedSection,
   type SectionDisclosure,
+  type SharedArticle,
 } from "./lib/session";
 import {
   applyTheme,
@@ -148,6 +151,7 @@ export default function App() {
   const policyRef = useRef<Policy>(policy);
   const scannedRef = useRef<ScannedSection[]>(scanned);
   const openRequestRef = useRef(0);
+  const writtenRef = useRef<SharedArticle | null | undefined>(undefined);
   useLayoutEffect(() => {
     articleRef.current = article;
     policyRef.current = policy;
@@ -176,6 +180,14 @@ export default function App() {
       setLoading(false);
       return { status: "failed", error: message };
     }
+  }, []);
+
+  /** Going back to an entry that names no article leaves the reader on the search screen. */
+  const closeArticle = useCallback(() => {
+    openRequestRef.current += 1;
+    setArticle(null);
+    setError(null);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -207,15 +219,46 @@ export default function App() {
     if (start.article) void openArticle(start.article.lang, start.article.title);
   }, [openArticle, start]);
 
+  /*
+   * Reading another article is going somewhere, so it takes its own history entry and the back
+   * button returns to the article before it. Reopening the same one and moving the sensitivity are
+   * the same place seen differently, and rewrite the entry in place.
+   */
   useEffect(() => {
+    /*
+     * A shared link's own URL stands until its article is open: until then this page knows nothing
+     * the URL does not already say, and writing over it would drop the title the reader arrived on.
+     */
+    if (!article && start.article && writtenRef.current === undefined) return;
+    const target: SharedArticle | null = article ? { lang: article.lang, title: article.title } : null;
+    const action = historyActionFor(writtenRef.current, target);
+    writtenRef.current = target;
     const params = new URLSearchParams();
     params.set("sensitivity", String(policy.sensitivity));
-    if (article) {
-      params.set("lang", article.lang);
-      params.set("title", article.title);
+    if (target) {
+      params.set("lang", target.lang);
+      params.set("title", target.title);
     }
-    window.history.replaceState(null, "", `?${params}`);
-  }, [article, policy.sensitivity]);
+    const url = `?${params}`;
+    if (action === "push") window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  }, [article, policy.sensitivity, start.article]);
+
+  /*
+   * The browser has already moved by the time this fires, so the entry it landed on is where the
+   * reader is rather than somewhere to add. The sensitivity in that URL is left alone: it is the
+   * reader's setting now, not a property of the page they went back to.
+   */
+  useEffect(() => {
+    const onPopState = () => {
+      const target = readArticleTarget(window.location.search);
+      writtenRef.current = target;
+      if (target) void openArticle(target.lang, target.title);
+      else closeArticle();
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [closeArticle, openArticle]);
 
   /** `system` is not a paint order, so it is resolved here and again whenever the system changes. */
   useEffect(() => {
