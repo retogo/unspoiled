@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { flowDelay, flowPieces } from "./lib/flow";
 import {
   assessSection,
   countHidden,
@@ -21,6 +22,14 @@ import {
   type ScannedSection,
   type SectionDisclosure,
 } from "./lib/session";
+import {
+  applyTheme,
+  DARK_SCHEME_QUERY,
+  readTheme,
+  resolveTheme,
+  THEME_KEY,
+  type ThemeChoice,
+} from "./lib/theme";
 import { buildTools, type OpenResult } from "./lib/tools";
 import { registerTools, type RegistrationState, type ToolCall } from "./lib/webmcp";
 import { fetchArticle, searchArticles, type Lang, type SearchHit } from "./lib/wikipedia";
@@ -42,6 +51,12 @@ const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[
   { sensitivity: 0, label: "Open", hint: "Show everything, your agent's withholding included" },
   { sensitivity: 50, label: "Balanced", hint: "Withhold plot summaries and outright reveals" },
   { sensitivity: 75, label: "Strict", hint: "Withhold narrative and anything suspicious" },
+];
+
+const THEMES: { choice: ThemeChoice; label: string }[] = [
+  { choice: "light", label: "Light" },
+  { choice: "dark", label: "Dark" },
+  { choice: "system", label: "System" },
 ];
 
 function sensitivityHint(sensitivity: number): string {
@@ -74,6 +89,8 @@ export default function App() {
   const [registration, setRegistration] = useState<RegistrationState>({ api: "unavailable", toolCount: 0 });
   const [calls, setCalls] = useState<ToolCall[]>([]);
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
+  const [flowing, setFlowing] = useState<ReadonlyMap<string, number>>(new Map());
+  const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
 
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
@@ -148,6 +165,20 @@ export default function App() {
     window.history.replaceState(null, "", `?${params}`);
   }, [article, policy.sensitivity]);
 
+  /** `system` is not a paint order, so it is resolved here and again whenever the system changes. */
+  useEffect(() => {
+    const system = window.matchMedia(DARK_SCHEME_QUERY);
+    const paint = () => applyTheme(resolveTheme(theme, system.matches));
+    paint();
+    system.addEventListener("change", paint);
+    return () => system.removeEventListener("change", paint);
+  }, [theme]);
+
+  const chooseTheme = useCallback((choice: ThemeChoice) => {
+    window.localStorage.setItem(THEME_KEY, choice);
+    setTheme(choice);
+  }, []);
+
   const search = useCallback(async () => {
     if (term.trim().length === 0) return;
     setLoading(true);
@@ -192,19 +223,46 @@ export default function App() {
   const reveal = (sentenceIds: string[]) =>
     setPolicy((current) => ({ ...current, revealed: new Set([...current.revealed, ...sentenceIds]) }));
 
+  const hide = (sentenceIds: string[]) =>
+    setPolicy((current) => {
+      const revealed = new Set(current.revealed);
+      for (const id of sentenceIds) revealed.delete(id);
+      return { ...current, revealed };
+    });
+
+  /**
+   * Which sentences arrive a word at a time, and in what order they were opened. Opening one is a
+   * deliberate act — a button here, or a reveal tool — and worth watching arrive. The slider can
+   * open hundreds at once and never touches `revealed`, so those keep the plain fade.
+   */
+  const revealedBefore = useRef(policy.revealed);
+  useEffect(() => {
+    const before = revealedBefore.current;
+    revealedBefore.current = policy.revealed;
+    const opened = [...policy.revealed].filter((id) => !before.has(id));
+    const closed = [...before].filter((id) => !policy.revealed.has(id));
+    if (opened.length === 0 && closed.length === 0) return;
+    setFlowing((current) => {
+      const next = new Map(current);
+      for (const id of closed) next.delete(id);
+      opened.forEach((id, order) => next.set(id, order));
+      return next;
+    });
+  }, [policy.revealed]);
+
   return (
     <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
-      <header className="border-b border-zinc-200 bg-white">
+      <header className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-4">
           <h1 className="text-xl font-semibold tracking-tight">Unspoiled</h1>
-          <p className="text-sm text-zinc-500">Read Wikipedia without learning the ending.</p>
+          <p className="text-sm text-muted">Read Wikipedia without learning the ending.</p>
           <span
             className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
               registration.api === "unavailable"
-                ? "bg-zinc-100 text-zinc-500"
+                ? "bg-raised text-muted"
                 : registration.error
-                  ? "bg-amber-50 text-amber-900"
-                  : "bg-emerald-50 text-emerald-700"
+                  ? "bg-warn-surface text-warn-ink"
+                  : "bg-ok-surface text-ok-ink"
             }`}
           >
             {registration.api === "unavailable"
@@ -213,6 +271,20 @@ export default function App() {
                 ? `This page could not expose its tools — ${registration.error}`
                 : `${registration.toolCount} tools exposed via ${registration.api}`}
           </span>
+          <div role="group" aria-label="Page theme" className="flex gap-0.5 rounded-full bg-raised p-0.5">
+            {THEMES.map((option) => (
+              <button
+                key={option.choice}
+                onClick={() => chooseTheme(option.choice)}
+                aria-pressed={theme === option.choice}
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  theme === option.choice ? "bg-ink text-inverse" : "text-muted hover:text-ink"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -225,13 +297,13 @@ export default function App() {
               the one control they keep reaching for is pinned to the bottom of the screen instead.
               It stays the same slider: the presets and the hint are what step aside to fit.
             */}
-            <div className="fixed inset-x-0 bottom-0 z-10 border-t border-zinc-200 bg-white px-5 pt-1.5 pb-2 lg:static lg:mt-2 lg:rounded-lg lg:border-x lg:border-b lg:px-3 lg:pt-2.5">
+            <div className="fixed inset-x-0 bottom-0 z-10 border-t border-line bg-surface px-5 pt-1.5 pb-2 lg:static lg:mt-2 lg:rounded-lg lg:border-x lg:border-b lg:px-3 lg:pt-2.5">
               <div className="flex flex-wrap items-baseline justify-between gap-x-2">
                 <label htmlFor="sensitivity" className="font-medium tabular-nums">
                   Sensitivity {policy.sensitivity}
                 </label>
                 {counts && (
-                  <span className="text-xs tabular-nums text-zinc-500">
+                  <span className="text-xs tabular-nums text-muted">
                     {counts.hidden} of {counts.total} sentences withheld
                   </span>
                 )}
@@ -259,18 +331,18 @@ export default function App() {
                     } ${
                       policy.sensitivity === preset.sensitivity
                         ? "font-medium text-ink"
-                        : "text-zinc-500 hover:text-ink"
+                        : "text-muted hover:text-ink"
                     }`}
                   >
-                    <span className="h-1.5 w-px bg-zinc-300" />
+                    <span className="h-1.5 w-px bg-edge" />
                     {preset.label}
                   </button>
                 ))}
               </div>
-              <p className="hidden text-xs leading-5 text-zinc-500 lg:block">{sensitivityHint(policy.sensitivity)}</p>
+              <p className="hidden text-xs leading-5 text-muted lg:block">{sensitivityHint(policy.sensitivity)}</p>
             </div>
             {policy.alreadyKnows.length > 0 && (
-              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <div className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
                 <p className="font-medium">Your agent says you already know</p>
                 <ul className="mt-1 list-inside list-disc">
                   {policy.alreadyKnows.map((item) => (
@@ -286,7 +358,7 @@ export default function App() {
               </div>
             )}
             {policy.notes && (
-              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <p className="mt-2 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
                 Your agent said: {policy.notes}
               </p>
             )}
@@ -296,12 +368,12 @@ export default function App() {
             <section>
               <h3 className="font-semibold">Your agent has read</h3>
               {scannedHeadings.length > 0 && (
-                <p className="mt-1 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-900">
+                <p className="mt-1 rounded-lg bg-alert-surface px-3 py-2 text-xs text-alert-ink">
                   {scannedHeadings.join(", ")}. It knows those spoilers for the rest of this conversation.
                 </p>
               )}
               {elsewhere.length > 0 && (
-                <ul className="mt-1 space-y-1 text-xs text-zinc-500">
+                <ul className="mt-1 space-y-1 text-xs text-muted">
                   {elsewhere.map((group) => (
                     <li key={group.articleTitle}>
                       {group.articleTitle} — {group.sections === 1 ? "1 section" : `${group.sections} sections`}
@@ -317,7 +389,7 @@ export default function App() {
               <Ledger
                 title="Revealed on your page"
                 rows={openedOnPage}
-                className="border border-zinc-200 bg-white text-zinc-600"
+                className="border border-line bg-surface text-mask-ink"
               />
             </Panel>
             <Panel title="Text sent to your agent" count={sentCount}>
@@ -325,7 +397,7 @@ export default function App() {
                 title="Text sent to your agent"
                 rows={sentToTheAgent}
                 elsewhere={sentFromElsewhere}
-                className="border border-red-100 bg-red-50 text-red-900"
+                className="border border-alert-line bg-alert-surface text-alert-ink"
               />
             </Panel>
           </div>
@@ -334,14 +406,14 @@ export default function App() {
             <section>
               <h3 className="font-semibold">Tool activity</h3>
               {calls.length === 0 ? (
-                <p className="mt-1 text-xs text-zinc-500">Nothing yet. Ask your agent to filter this page.</p>
+                <p className="mt-1 text-xs text-muted">Nothing yet. Ask your agent to filter this page.</p>
               ) : (
                 <ul className="mt-1 space-y-1 text-xs">
                   {calls.map((call) => (
-                    <li key={`${call.at}-${call.tool}`} className="rounded bg-white px-2 py-1">
+                    <li key={`${call.at}-${call.tool}`} className="rounded bg-surface px-2 py-1">
                       <code className="font-medium">{call.tool}</code>
-                      {!call.ok && <span className="ml-1 font-medium text-red-700">error</span>}
-                      <span className={`block ${call.ok ? "text-zinc-500" : "text-red-700"}`}>
+                      {!call.ok && <span className="ml-1 font-medium text-alert-text">error</span>}
+                      <span className={`block ${call.ok ? "text-muted" : "text-alert-text"}`}>
                         {call.input} → {call.summary}
                       </span>
                     </li>
@@ -357,7 +429,7 @@ export default function App() {
             <select
               value={lang}
               onChange={(event) => setLang(event.target.value as Lang)}
-              className="rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm"
+              className="rounded-lg border border-edge bg-surface px-2 py-2 text-sm"
             >
               <option value="en">English</option>
               <option value="ja">日本語</option>
@@ -369,11 +441,11 @@ export default function App() {
                 if (event.key === "Enter" && !event.nativeEvent.isComposing) void search();
               }}
               placeholder="Search Wikipedia for a film, series or novel"
-              className="min-w-0 flex-1 basis-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm sm:basis-auto"
+              className="min-w-0 flex-1 basis-full rounded-lg border border-edge bg-surface px-3 py-2 text-sm sm:basis-auto"
             />
             <button
               onClick={() => void search()}
-              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-white"
+              className="rounded-lg bg-ink px-4 py-2 text-sm font-medium text-inverse"
             >
               Search
             </button>
@@ -385,28 +457,28 @@ export default function App() {
                 <button
                   key={`${demo.lang}:${demo.title}`}
                   onClick={() => void openArticle(demo.lang, demo.title)}
-                  className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-left text-sm hover:border-zinc-400"
+                  className="rounded-lg border border-edge bg-surface px-3 py-2 text-left text-sm hover:border-edge-hover"
                 >
                   <span className="font-medium">{demo.title}</span>
-                  <span className="block text-xs text-zinc-500">{demo.note}</span>
+                  <span className="block text-xs text-muted">{demo.note}</span>
                 </button>
               ))}
             </div>
           )}
 
-          {loading && <p className="mt-6 text-sm text-zinc-500">Loading…</p>}
-          {error && <p className="mt-6 text-sm text-red-700">{error}</p>}
+          {loading && <p className="mt-6 text-sm text-muted">Loading…</p>}
+          {error && <p className="mt-6 text-sm text-alert-text">{error}</p>}
 
           {hits.length > 0 && (
-            <ul className="mt-4 divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
+            <ul className="mt-4 divide-y divide-line rounded-lg border border-line bg-surface">
               {hits.map((hit) => (
                 <li key={hit.title}>
                   <button
                     onClick={() => void openArticle(lang, hit.title)}
-                    className="block w-full px-4 py-3 text-left hover:bg-zinc-50"
+                    className="block w-full px-4 py-3 text-left hover:bg-row-hover"
                   >
                     <span className="text-sm font-medium">{hit.title}</span>
-                    <span className="block text-xs text-zinc-500">{hit.snippet}</span>
+                    <span className="block text-xs text-muted">{hit.snippet}</span>
                   </button>
                 </li>
               ))}
@@ -416,21 +488,29 @@ export default function App() {
           {article && (
             <article className="mt-6">
               <h2 className="text-2xl font-semibold tracking-tight">{article.displayTitle}</h2>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-muted">
                 {counts?.hidden} of {counts?.total} sentences withheld ·{" "}
                 <a className="underline" href={article.sourceUrl} target="_blank" rel="noreferrer">
                   original article
                 </a>
               </p>
               {article.sections.map((section) => (
-                <SectionView key={section.id} section={section} policy={policy} onReveal={reveal} />
+                <SectionView
+                  key={section.id}
+                  section={section}
+                  policy={policy}
+                  lang={article.lang}
+                  flowing={flowing}
+                  onReveal={reveal}
+                  onHide={hide}
+                />
               ))}
             </article>
           )}
         </div>
       </main>
 
-      <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-zinc-500">
+      <footer className="mx-auto max-w-5xl px-5 py-8 text-xs text-muted">
         Article text from Wikipedia, licensed{" "}
         <a className="underline" href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">
           CC BY-SA 4.0
@@ -459,7 +539,7 @@ function ledgerRows(disclosures: SectionDisclosure[], policy: Policy): LedgerRow
 function Panel({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <details className="panel">
-      <summary className="cursor-pointer rounded-lg border border-zinc-200 bg-white px-3 py-2 font-semibold">
+      <summary className="cursor-pointer rounded-lg border border-line bg-surface px-3 py-2 font-semibold">
         {title} · {count}
       </summary>
       {children}
@@ -486,7 +566,7 @@ function Ledger({
   return (
     <section>
       <h3 className="font-semibold">{title}</h3>
-      {rows.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-zinc-500">Nothing yet.</p>}
+      {rows.length === 0 && elsewhere.length === 0 && <p className="mt-1 text-xs text-muted">Nothing yet.</p>}
       {rows.length > 0 && (
         <ul className={`mt-1 space-y-0.5 rounded-lg px-3 py-2 text-xs ${className}`}>
           {rows.map((row) => (
@@ -497,7 +577,7 @@ function Ledger({
         </ul>
       )}
       {elsewhere.length > 0 && (
-        <ul className="mt-1 space-y-0.5 text-xs text-zinc-500">
+        <ul className="mt-1 space-y-0.5 text-xs text-muted">
           {elsewhere.map((group) => (
             <li key={group.articleTitle}>
               {group.articleTitle} — {sentenceCount(group.sentences)}
@@ -512,11 +592,17 @@ function Ledger({
 function SectionView({
   section,
   policy,
+  lang,
+  flowing,
   onReveal,
+  onHide,
 }: {
   section: Section;
   policy: Policy;
+  lang: Lang;
+  flowing: ReadonlyMap<string, number>;
   onReveal: (sentenceIds: string[]) => void;
+  onHide: (sentenceIds: string[]) => void;
 }) {
   const risk = assessSection(section);
   const known = isSectionKnown(policy, section.id);
@@ -526,12 +612,28 @@ function SectionView({
     0,
   );
   const allHidden = groups.every((group) => group.every((run) => run.hidden));
+  const opened = section.paragraphs.flatMap((paragraph) =>
+    paragraph.sentences.filter((sentence) => policy.revealed.has(sentence.id)).map((sentence) => sentence.id),
+  );
+  const heading = (
+    <SectionHeading
+      section={section}
+      hidden={hidden}
+      known={known}
+      policy={policy}
+      lang={lang}
+      flowing={flowing}
+      opened={opened}
+      onReveal={onReveal}
+      onHide={onHide}
+    />
+  );
 
   if (allHidden) {
     return (
       <section className="mt-6">
-        <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
-        <p className="unspoiled-mask mt-2 text-xs text-zinc-500">
+        {heading}
+        <p className="unspoiled-mask mt-2 text-xs text-muted">
           {section.paragraphs.length} paragraphs withheld — {risk.reason}. Plot summaries run in order, so you can
           open only as far as you have watched.
         </p>
@@ -540,10 +642,10 @@ function SectionView({
             <button
               key={paragraph.id}
               onClick={() => onReveal(paragraph.sentences.map((sentence) => sentence.id))}
-              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-zinc-300 bg-white px-3 py-2 text-left text-xs text-zinc-600 hover:border-zinc-400"
+              className="unspoiled-mask flex w-full items-baseline gap-2 rounded-lg border border-dashed border-edge bg-surface px-3 py-2 text-left text-xs text-mask-ink hover:border-edge-hover"
             >
               <span className="font-medium">Paragraph {index + 1}</span>
-              <span className="text-zinc-400">
+              <span className="text-faint">
                 {paragraph.sentences.length} sentences ·{" "}
                 {paragraph.sentences.reduce((total, sentence) => total + sentence.text.length, 0)} chars
               </span>
@@ -557,7 +659,7 @@ function SectionView({
 
   return (
     <section className="mt-6">
-      <SectionHeading section={section} hidden={hidden} known={known} policy={policy} onReveal={onReveal} />
+      {heading}
       {section.paragraphs.map((paragraph, index) => (
         <p key={paragraph.id} className="mt-3 leading-7">
           {groups[index].map((run) =>
@@ -566,16 +668,20 @@ function SectionView({
                 key={run.key}
                 onClick={() => onReveal(run.sentences.map((sentence) => sentence.id))}
                 title={run.reason}
-                className="unspoiled-mask mx-0.5 rounded bg-zinc-200 px-2 py-0.5 align-baseline text-xs text-zinc-600 hover:bg-zinc-300"
+                className="unspoiled-mask mx-0.5 rounded bg-mask px-2 py-0.5 align-baseline text-xs text-mask-ink hover:bg-mask-hover"
               >
                 {run.sentences.length === 1 ? "1 sentence" : `${run.sentences.length} sentences`} withheld · reveal
               </button>
             ) : (
-              /* One span per sentence, so only the sentences that just appeared animate in. */
+              /* One view per sentence, so only the sentences that just appeared animate in. */
               run.sentences.map((sentence) => (
-                <span key={sentence.id} className="unspoiled-text">
-                  {sentence.text}{" "}
-                </span>
+                <SentenceView
+                  key={sentence.id}
+                  sentence={sentence}
+                  lang={lang}
+                  order={flowing.get(sentence.id)}
+                  onHide={policy.revealed.has(sentence.id) ? onHide : null}
+                />
               ))
             ),
           )}
@@ -585,43 +691,147 @@ function SectionView({
   );
 }
 
+/** The marker that says a run of text is on screen because the reader opened it, and can be closed again. */
+const OPENED = "underline decoration-dotted decoration-edge underline-offset-4";
+
+/**
+ * A sentence the reader can see. One the slider opened fades in whole; one they opened themselves
+ * arrives word by word and keeps a control to close it again.
+ */
+function SentenceView({
+  sentence,
+  lang,
+  order,
+  onHide,
+  label = "Hide this sentence again",
+}: {
+  sentence: { id: string; text: string };
+  lang: Lang;
+  order: number | undefined;
+  onHide: ((sentenceIds: string[]) => void) | null;
+  label?: string;
+}) {
+  const body =
+    order === undefined ? (
+      <span className="unspoiled-text">{sentence.text}</span>
+    ) : (
+      <FlowingText text={sentence.text} lang={lang} order={order} />
+    );
+
+  if (!onHide) {
+    return (
+      <>
+        {body}{" "}
+      </>
+    );
+  }
+
+  return (
+    <span className="group">
+      <span className={OPENED}>{body}</span>
+      <HideButton label={label} onClick={() => onHide([sentence.id])} />
+    </span>
+  );
+}
+
+/** The words of an opened sentence, each set to arrive a beat after the one before it. */
+function FlowingText({ text, lang, order }: { text: string; lang: Lang; order: number }) {
+  const pieces = useMemo(() => flowPieces(text, lang), [lang, text]);
+  return (
+    <>
+      {pieces.map((piece, index) => (
+        <span
+          key={`${index}:${piece}`}
+          className="unspoiled-flow"
+          style={{ animationDelay: `${flowDelay(index, pieces.length, order)}ms` }}
+        >
+          {piece}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** It stands where the space between sentences would be, so opening one barely moves the text. */
+function HideButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title="Hide again"
+      className="inline-block w-2.5 rounded align-baseline text-center text-[11px] leading-none text-faint opacity-0 transition-opacity group-hover:opacity-100 hover:text-ink focus-visible:opacity-100"
+    >
+      ×
+    </button>
+  );
+}
+
 function SectionHeading({
   section,
   hidden,
   known,
   policy,
+  lang,
+  flowing,
+  opened,
   onReveal,
+  onHide,
 }: {
   section: Section;
   hidden: number;
   known: string | null;
   policy: Policy;
+  lang: Lang;
+  flowing: ReadonlyMap<string, number>;
+  opened: string[];
   onReveal: (ids: string[]) => void;
+  onHide: (ids: string[]) => void;
 }) {
   const withheldHeading = hiddenHeading(section, policy);
+  const id = headingId(section);
+  const heading = policy.revealed.has(id) ? (
+    <SentenceView
+      sentence={{ id, text: sectionHeading(section) }}
+      lang={lang}
+      order={flowing.get(id)}
+      onHide={onHide}
+      label="Hide this heading again"
+    />
+  ) : (
+    sectionHeading(section)
+  );
+
   return (
-    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-zinc-200 pb-1 text-lg font-semibold">
+    <h3 className="flex flex-wrap items-baseline gap-2 border-b border-line pb-1 text-lg font-semibold">
       {withheldHeading ? (
         <button
-          onClick={() => onReveal([headingId(section)])}
+          onClick={() => onReveal([id])}
           title={withheldHeading.reason}
-          className="unspoiled-mask rounded bg-zinc-200 px-2 py-0.5 text-sm font-medium text-zinc-600 hover:bg-zinc-300"
+          className="unspoiled-mask rounded bg-mask px-2 py-0.5 text-sm font-medium text-mask-ink hover:bg-mask-hover"
         >
           Heading withheld · reveal
         </button>
       ) : (
-        sectionHeading(section)
+        heading
       )}
       {known ? (
-        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-900">
+        <span className="rounded bg-warn-badge px-1.5 py-0.5 text-[11px] font-medium text-warn-ink">
           shown — {known}
         </span>
       ) : (
         hidden > 0 && (
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-zinc-600">
+          <span className="rounded bg-raised px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-mask-ink">
             {hidden} withheld
           </span>
         )
+      )}
+      {opened.length > 1 && (
+        <button
+          onClick={() => onHide(opened)}
+          className="rounded bg-mask px-1.5 py-0.5 text-[11px] font-medium text-mask-ink hover:bg-mask-hover"
+        >
+          Hide {opened.length} sentences again
+        </button>
       )}
     </h3>
   );
