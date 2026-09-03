@@ -57,6 +57,7 @@ function fightClub(): Article {
 function harness() {
   let policy: Policy = newPolicy();
   const scanned: string[] = [];
+  const sent: string[] = [];
   const article = fightClub();
   const tools = buildTools({
     article: () => article,
@@ -66,8 +67,10 @@ function harness() {
     },
     openArticle: () => Promise.resolve({ status: "opened", article, policy }),
     scanned: () => scanned,
-    markScanned: (_article, sectionId) => {
+    sent: () => sent,
+    markScanned: (_article, sectionId, disclosed) => {
       if (!scanned.includes(sectionId)) scanned.push(sectionId);
+      for (const id of disclosed) if (!sent.includes(id)) sent.push(id);
     },
   });
 
@@ -79,6 +82,7 @@ function harness() {
     },
     policy: () => policy,
     scanned,
+    sent,
   };
 }
 
@@ -249,5 +253,59 @@ describe("reveal is a disclosure the reader can see", () => {
     const { call, scanned } = harness();
     call("reveal_withheld_sentences", { sentence_ids: ["s3.heading"] });
     expect(scanned).toEqual(["s3"]);
+  });
+});
+
+describe("the ledger of text that reached the agent", () => {
+  it("records the sentences a reveal took out of the mask", () => {
+    const { call, sent } = harness();
+    call("reveal_withheld_sentences", { sentence_ids: ["p1.0", "p1.1"] });
+    expect(sent).toEqual(["p1.0", "p1.1"]);
+  });
+
+  it("records nothing for a sentence that was already on screen", () => {
+    const { call, sent } = harness();
+    call("reveal_withheld_sentences", { sentence_ids: ["p0.0"] });
+    expect(sent).toEqual([]);
+  });
+
+  it("records a withheld heading the agent revealed", () => {
+    const { call, sent } = harness();
+    call("reveal_withheld_sentences", { sentence_ids: ["s3.heading"] });
+    expect(sent).toEqual(["s3.heading"]);
+  });
+
+  it("records every sentence of a section read in full", () => {
+    const { call, sent } = harness();
+    call("read_withheld_section", { section_id: "s1", acknowledge: true });
+    expect(sent).toEqual(["p1.0", "p1.1", "p2.0"]);
+  });
+
+  it("records the heading of a section read in full when the page was withholding it", () => {
+    const { call, sent } = harness();
+    call("read_withheld_section", { section_id: "s3", acknowledge: true });
+    expect(sent).toEqual(["s3.heading", "p4.0"]);
+  });
+
+  it("records nothing when read_withheld_section refuses", () => {
+    const { call, sent, scanned } = harness();
+    call("read_withheld_section", { section_id: "s1", acknowledge: false });
+    expect(sent).toEqual([]);
+    expect(scanned).toEqual([]);
+  });
+
+  it("reports what is open on the page apart from what was sent", () => {
+    const { call } = harness();
+    call("reveal_withheld_sentences", { sentence_ids: ["p1.0"] });
+    call("read_withheld_section", { section_id: "s2", acknowledge: true });
+    const report = call("get_masking_report");
+    expect(report.revealed_on_page).toEqual(["p1.0"]);
+    expect(report.text_sent_to_agent).toEqual(["p1.0", "p3.0", "p3.1"]);
+  });
+
+  it("names no withheld heading in either ledger", () => {
+    const { call } = harness();
+    call("read_withheld_section", { section_id: "s3", acknowledge: true });
+    expect(JSON.stringify(call("get_masking_report"))).not.toContain("finale");
   });
 });

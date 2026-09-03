@@ -25,6 +25,7 @@
   --color-warn-badge: #fef3c7;
   --color-warn-ink: #78350f;
   --color-alert-surface: #fef2f2;
+  --color-alert-line: #fee2e2;
   --color-alert-ink: #7f1d1d;
   --color-alert-text: #b91c1c;
 }
@@ -60,6 +61,7 @@ html[data-theme="dark"] {
   --color-warn-badge: #78350f;
   --color-warn-ink: #fde68a;
   --color-alert-surface: #450a0a;
+  --color-alert-line: #7f1d1d;
   --color-alert-ink: #fecaca;
   --color-alert-text: #fca5a5;
 }
