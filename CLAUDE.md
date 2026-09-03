@@ -49,11 +49,15 @@ at the root). The reader must work with no agent attached; the tools are an addi
   article currently open. Reset article-scoped policy on article change; never trust ids from a URL.
   Sensitivity belongs to the reader and survives the change, and so does the log in `decisions`:
   those ids are never applied again, and the reader keeps the record of what was decided for them.
-- Sensitivity is the reader's control, and the safety net for a reader with no agent attached.
+- Sensitivity and literal excluded words are the reader's controls, and the safety net for a reader with no agent attached.
   No tool sets it; `get_masking_report` reports it. It is the only thing the sidebar holds:
   everything the page has to say about the agent is placed against the article instead.
 - Tool names say what they hand the agent (`read_article_content`, `apply_mask`). Never name
-  anything "safe": the wording rules miss spoilers, and shown does not mean spoiler-free.
+  anything "safe": the wording rules miss spoilers, and shown does not mean spoiler-free. Excluded
+  words are stored on the reader's device and survive article changes.
+- Rules added through `add_rules` may themselves reveal a spoiler. They are literal, case-insensitive
+  matches and stay redacted in the UI until the reader explicitly reveals one; the tool result,
+  activity log and masking report expose only their count. Disclosure state is not persisted.
 - Tool descriptions are the only channel the page has to steer an agent. Each one names the call
   that should come next, and `read_article_content` is where the agent is told not to repeat what
   it read. Treat them as product copy and update them with every behaviour change.

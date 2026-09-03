@@ -26,6 +26,7 @@ function article(lang: Lang, title: string): Article {
 
 const usedPolicy: Policy = {
   sensitivity: 50,
+  exclusionRules: [{ word: "Titan", source: "reader" }],
   shown: new Set(["p1.0"]),
   hidden: new Set(["p2.1"]),
   decisions: [

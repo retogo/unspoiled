@@ -144,6 +144,39 @@ describe("the presets marked on the slider", () => {
   });
 });
 
+describe("custom excluded words", () => {
+  it("withholds matching sentences, persists words, and lets the reader remove them", async () => {
+    await openArticle();
+    drag(0);
+    expect(screen.getByText(OPENING)).toBeTruthy();
+    await userEvent.click(screen.getByText("Excluded words"));
+    await userEvent.type(screen.getByLabelText("Word to withhold"), "shot by a former patient");
+    await userEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.queryByText(OPENING)).toBeNull();
+    expect(window.localStorage.getItem("unspoiled.excludedWords")).toBe(
+      JSON.stringify([{ word: "shot by a former patient", source: "reader" }]),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /shot by a former patient/ }));
+    expect(window.localStorage.getItem("unspoiled.excludedWords")).toBe("[]");
+    expect(screen.getByText(OPENING)).toBeTruthy();
+  });
+
+  it("reveals an agent rule only after the reader explicitly asks", async () => {
+    window.localStorage.setItem(
+      "unspoiled.excludedWords",
+      JSON.stringify([{ word: "shot by a former patient", source: "agent" }]),
+    );
+    await openArticle();
+    await userEvent.click(screen.getByText("Excluded words (1)"));
+
+    expect(document.body.textContent).not.toContain("shot by a former patient");
+    await userEvent.click(screen.getByRole("button", { name: "Reveal agent rule 1" }));
+    expect(screen.getByRole("button", { name: "Remove shot by a former patient" })).toBeTruthy();
+  });
+});
+
 describe("a shared link", () => {
   it("sets the slider for a reader who has none stored", async () => {
     await openArticle("?title=The%20Sixth%20Sense&lang=en&sensitivity=0");

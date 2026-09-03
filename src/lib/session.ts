@@ -1,4 +1,4 @@
-import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
+import { DEFAULT_SENSITIVITY, newPolicy, type ExclusionRule, type Policy } from "./risk";
 import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 
@@ -50,11 +50,15 @@ export function readArticleTarget(search: string): SharedArticle | null {
  * that arrives from either source is only used when it is a whole number on the
  * scale.
  */
-export function readSessionStart(search: string, storedSensitivity: string | null): SessionStart {
+export function readSessionStart(
+  search: string,
+  storedSensitivity: string | null,
+  exclusionRules: ExclusionRule[] = [],
+): SessionStart {
   const params = new URLSearchParams(search);
   const sensitivity =
     asSensitivity(storedSensitivity) ?? asSensitivity(params.get("sensitivity")) ?? DEFAULT_SENSITIVITY;
-  return { policy: newPolicy(sensitivity), article: readArticleTarget(search) };
+  return { policy: newPolicy(sensitivity, exclusionRules), article: readArticleTarget(search) };
 }
 
 /**
@@ -93,7 +97,7 @@ function isSameArticle(open: Article | null, opened: Article): boolean {
  */
 export function policyForOpened(policy: Policy, open: Article | null, opened: Article): Policy {
   if (isSameArticle(open, opened)) return policy;
-  return { ...newPolicy(policy.sensitivity), decisions: policy.decisions };
+  return { ...newPolicy(policy.sensitivity, policy.exclusionRules), decisions: policy.decisions };
 }
 
 export function scannedForArticle(scanned: ScannedSection[], article: Article | null): string[] {

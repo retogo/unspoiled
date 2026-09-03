@@ -90,6 +90,26 @@ describe("reveal wording", () => {
   });
 });
 
+describe("reader excluded words", () => {
+  it("withholds a sentence containing a reader's word regardless of sensitivity", () => {
+    const target = section("Production", ["The score was composed by Hans Zimmer."]);
+    expect(hiddenSentence(firstSentence(target), target, newPolicy(0, [{ word: "Hans Zimmer", source: "reader" }]))).toBe(true);
+  });
+
+  it("matches literally and without case sensitivity", () => {
+    const target = section("Production", ["Version 2.0 was released after filming."]);
+    expect(hiddenSentence(firstSentence(target), target, newPolicy(0, [{ word: "VERSION 2.0", source: "reader" }]))).toBe(true);
+    expect(hiddenSentence(firstSentence(target), target, newPolicy(0, [{ word: "2.*released", source: "reader" }]))).toBe(false);
+  });
+
+  it("lets an explicit reader or agent decision show the sentence", () => {
+    const target = section("Production", ["The score was composed by Hans Zimmer."]);
+    const policy = newPolicy(100, [{ word: "Hans Zimmer", source: "reader" }]);
+    policy.shown.add(firstSentence(target).id);
+    expect(hiddenSentence(firstSentence(target), target, policy)).toBe(false);
+  });
+});
+
 describe("how a sentence is scored", () => {
   it("opens a plot summary from the front: the first sentence scores lowest, the last scores highest", () => {
     const plot = section("Plot", [

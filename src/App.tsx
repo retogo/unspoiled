@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
@@ -19,6 +20,7 @@ import {
   hiddenSentenceReason,
   maskWith,
   type Decision,
+  type ExclusionRule,
   type Policy,
 } from "./lib/risk";
 import {
@@ -64,6 +66,25 @@ const DEMO_ARTICLES: { lang: Lang; title: string; note: string }[] = [
 ];
 
 const SENSITIVITY_KEY = "unspoiled.sensitivity";
+const EXCLUDED_WORDS_KEY = "unspoiled.excludedWords";
+
+function readExclusionRules(raw: string | null): ExclusionRule[] {
+  if (!raw) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((entry): ExclusionRule[] => {
+      if (typeof entry === "string" && entry.trim()) return [{ word: entry.trim(), source: "reader" }];
+      if (!entry || typeof entry !== "object") return [];
+      const { word, source } = entry as Partial<ExclusionRule>;
+      return typeof word === "string" && word.trim() && (source === "reader" || source === "agent")
+        ? [{ word: word.trim(), source }]
+        : [];
+    });
+  } catch {
+    return [];
+  }
+}
 
 /** Three points on the scale worth a name, marked where they fall along the slider. */
 const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[] = [
@@ -142,7 +163,11 @@ const NOTICE_MS = 12000;
 
 export default function App() {
   const [start] = useState(() =>
-    readSessionStart(window.location.search, window.localStorage.getItem(SENSITIVITY_KEY)),
+    readSessionStart(
+      window.location.search,
+      window.localStorage.getItem(SENSITIVITY_KEY),
+      readExclusionRules(window.localStorage.getItem(EXCLUDED_WORDS_KEY)),
+    ),
   );
   const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
   const [article, setArticle] = useState<Article | null>(null);
@@ -156,6 +181,12 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
   const [notice, setNotice] = useState<Decision | null>(null);
   const [reading, setReading] = useState(false);
+  const [excludedWord, setExcludedWord] = useState("");
+  const [revealedAgentRules, setRevealedAgentRules] = useState<ReadonlySet<string>>(new Set());
+
+  useEffect(() => {
+    window.localStorage.setItem(EXCLUDED_WORDS_KEY, JSON.stringify(policy.exclusionRules));
+  }, [policy.exclusionRules]);
 
   /*
    * The tools are handed to the browser once, on mount, and are called long afterwards, so they read
@@ -338,6 +369,29 @@ export default function App() {
     setPolicy((current) => ({ ...current, sensitivity }));
   }, []);
 
+  const addExcludedWord = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const word = excludedWord.trim();
+    if (!word) return;
+    setPolicy((current) => {
+      if (current.exclusionRules.some((item) => item.word.toLocaleLowerCase() === word.toLocaleLowerCase())) {
+        return current;
+      }
+      return { ...current, exclusionRules: [...current.exclusionRules, { word, source: "reader" }] };
+    });
+    setExcludedWord("");
+  };
+
+  const removeExclusionRule = (index: number) => {
+    setPolicy((current) => {
+      return { ...current, exclusionRules: current.exclusionRules.filter((_, candidate) => candidate !== index) };
+    });
+  };
+
+  const revealAgentRule = (word: string) => {
+    setRevealedAgentRules((current) => new Set(current).add(word));
+  };
+
   /**
    * The reader reaching for a sentence lands in the same two sets the agent's decisions do, so a
    * tap can take back what an agent hid and an agent can take back what the wording rules withheld.
@@ -513,6 +567,57 @@ export default function App() {
                 ))}
               </div>
               <p className="hidden text-xs leading-5 text-muted lg:block">{sensitivityHint(policy.sensitivity)}</p>
+              <details className="mt-2 border-t border-line pt-2">
+                <summary className="cursor-pointer text-xs font-medium">
+                  Excluded words{policy.exclusionRules.length ? ` (${policy.exclusionRules.length})` : ""}
+                </summary>
+                <form onSubmit={addExcludedWord} className="mt-2 flex gap-1.5">
+                  <label htmlFor="excluded-word" className="sr-only">Word to withhold</label>
+                  <input
+                    id="excluded-word"
+                    value={excludedWord}
+                    onChange={(event) => setExcludedWord(event.target.value)}
+                    placeholder="Character, event, phrase…"
+                    className="min-w-0 flex-1 rounded border border-line bg-paper px-2 py-1 text-xs"
+                  />
+                  <button type="submit" className="rounded bg-ink px-2 py-1 text-xs font-medium text-inverse">
+                    Add
+                  </button>
+                </form>
+                {policy.exclusionRules.length > 0 && (
+                  <ul aria-label="Excluded words" className="mt-2 flex flex-wrap gap-1">
+                    {policy.exclusionRules.map((rule, index) => (
+                      <li key={`${rule.source}:${rule.word}`}>
+                        {rule.source === "agent" && !revealedAgentRules.has(rule.word) ? (
+                          <button
+                            type="button"
+                            onClick={() => revealAgentRule(rule.word)}
+                            aria-label={`Reveal agent rule ${index + 1}`}
+                            title="Reveal this agent rule; its wording may contain a spoiler"
+                            className="rounded-full bg-raised px-2 py-1 text-xs"
+                          >
+                            Agent rule <span aria-hidden="true">◉</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => removeExclusionRule(index)}
+                            aria-label={`Remove ${rule.word}`}
+                            title={`Remove ${rule.word}`}
+                            className="rounded-full bg-raised px-2 py-1 text-xs"
+                          >
+                            {rule.word} <span aria-hidden="true">×</span>
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-1.5 text-xs leading-5 text-muted">
+                  Sentences containing these words are withheld. Agent rules stay redacted until you reveal them;
+                  select a visible word to remove it.
+                </p>
+              </details>
             </div>
           </section>
         </aside>

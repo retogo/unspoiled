@@ -149,19 +149,44 @@ function sentencesOf(result: Record<string, never>, sectionId: string): ReadSent
 }
 
 describe("the tools the page offers", () => {
-  it("offers four, named for what each one does to the page", () => {
+  it("offers five, named for what each one does to the page", () => {
     expect(harness().tools.map((tool) => tool.name)).toEqual([
       "open_article",
       "read_article_content",
       "apply_mask",
+      "add_rules",
       "get_masking_report",
     ]);
   });
 
   it("tells the agent which call comes next in every description", () => {
     for (const tool of harness().tools) {
-      expect(tool.description).toMatch(/open_article|read_article_content|apply_mask|get_masking_report/);
+      expect(tool.description).toMatch(/open_article|read_article_content|apply_mask|add_rules|get_masking_report/);
     }
+  });
+});
+
+describe("add_rules", () => {
+  it("adds literal agent rules without echoing spoiler words in its response", () => {
+    const { call, policy } = harness(0);
+    const result = call("add_rules", { words: ["Tyler", "Project Mayhem"] });
+    expect(result).toMatchObject({ added: 2, total_agent_rules: 2 });
+    expect(JSON.stringify(result)).not.toMatch(/Tyler|Project Mayhem/);
+    expect(policy().exclusionRules).toEqual([
+      { word: "Tyler", source: "agent" },
+      { word: "Project Mayhem", source: "agent" },
+    ]);
+  });
+
+  it("withholds matches immediately and deduplicates without regard to case", () => {
+    const { call } = harness(0);
+    call("add_rules", { words: ["Tyler", "tyler"] });
+    expect(sentencesOf(call("read_article_content", { section_ids: ["s2"] }), "s2")[0].shown).toBe(false);
+    expect(call("get_masking_report").rules).toEqual({ reader_words: [], agent_rules: 1 });
+  });
+
+  it("rejects a call containing no usable rule", () => {
+    expect(() => harness().call("add_rules", { words: ["   "] })).toThrow(/at least one/);
   });
 });
 

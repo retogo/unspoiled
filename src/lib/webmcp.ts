@@ -110,6 +110,13 @@ function reply(value: unknown, ok: boolean) {
   return ok ? { content } : { content, isError: true };
 }
 
+/** Rule values can be spoilers themselves, so they never enter the reader-visible activity log. */
+function loggedInput(name: string, input: Record<string, unknown>): string {
+  if (name !== "add_rules") return JSON.stringify(input);
+  const count = Array.isArray(input.words) ? input.words.length : 0;
+  return JSON.stringify({ words: `${count} redacted` });
+}
+
 function dispatch(name: string) {
   return async (raw: unknown) => {
     const entry = live.get(name);
@@ -117,7 +124,7 @@ function dispatch(name: string) {
     const input = parseInput(raw);
     const { ok, value } = await runTool(entry.definition, input);
     const text = JSON.stringify(value);
-    entry.onCall({ at: Date.now(), tool: name, input: JSON.stringify(input), ok, summary: `${text.length} chars` });
+    entry.onCall({ at: Date.now(), tool: name, input: loggedInput(name, input), ok, summary: `${text.length} chars` });
     return reply(value, ok);
   };
 }

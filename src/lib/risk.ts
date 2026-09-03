@@ -2,6 +2,7 @@ import type { Article, Section, Sentence } from "./segment";
 import { isLead } from "./segment";
 
 export type RiskLevel = "safe" | "suspect" | "spoiler";
+export type ExclusionRule = { word: string; source: "reader" | "agent" };
 
 /**
  * `risk` is how much of the ending this text gives away, from 0 to 100. It is compared against the
@@ -152,6 +153,8 @@ export type Decision = {
 export type Policy = {
   /** 0 withholds nothing; 100 withholds anything carrying the least suspicion. */
   sensitivity: number;
+  /** Literal matching rules, with provenance so agent-supplied spoilers can stay redacted. */
+  exclusionRules: ExclusionRule[];
   /** Sentences a decision opened, whatever the wording rules make of them. */
   shown: Set<string>;
   /** Sentences a decision closed. Hiding beats showing, and both beat the wording rules. */
@@ -161,8 +164,8 @@ export type Policy = {
 
 export const DEFAULT_SENSITIVITY = 75;
 
-export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY): Policy {
-  return { sensitivity, shown: new Set(), hidden: new Set(), decisions: [] };
+export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY, exclusionRules: ExclusionRule[] = []): Policy {
+  return { sensitivity, exclusionRules, shown: new Set(), hidden: new Set(), decisions: [] };
 }
 
 /**
@@ -190,6 +193,12 @@ const HIDDEN_BY_DECISION: Assessment = {
   reason: "withheld by a decision on this page",
 };
 
+const HIDDEN_BY_EXCLUDED_WORD: Assessment = {
+  level: "spoiler",
+  risk: CERTAIN,
+  reason: "contains a word the reader chose to withhold",
+};
+
 /**
  * A decision outranks the wording rules in both directions, so an agent that has read the article
  * can open what the rules over-withheld and close what they missed. The sensitivity slider is the
@@ -198,6 +207,10 @@ const HIDDEN_BY_DECISION: Assessment = {
 export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
   if (policy.hidden.has(sentence.id)) return HIDDEN_BY_DECISION;
   if (policy.shown.has(sentence.id)) return null;
+  const folded = sentence.text.toLocaleLowerCase();
+  if (policy.exclusionRules.some(({ word }) => folded.includes(word.toLocaleLowerCase()))) {
+    return HIDDEN_BY_EXCLUDED_WORD;
+  }
   const assessment = assessSentences(section).get(sentence.id);
   if (!assessment) return null;
   return assessment.risk > CERTAIN - policy.sensitivity ? assessment : null;

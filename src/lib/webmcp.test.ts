@@ -62,6 +62,15 @@ describe("a tool whose handler returns", () => {
 });
 
 describe("the record of a call", () => {
+  it("redacts add_rules values because the rules may themselves be spoilers", async () => {
+    const { registered, calls } = await installAgent([tool("add_rules", () => ({ added: 2 }))]);
+
+    await registered[0].execute(JSON.stringify({ words: ["the killer", "secret identity"] }));
+
+    expect(calls[0].input).toBe(JSON.stringify({ words: "2 redacted" }));
+    expect(calls[0].input).not.toMatch(/killer|identity/);
+  });
+
   it("marks a call that failed", async () => {
     const { registered, calls } = await installAgent([
       tool("get_section", () => {

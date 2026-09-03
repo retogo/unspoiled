@@ -276,9 +276,59 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
       },
     },
     {
+      name: "add_rules",
+      description:
+        "Add literal words or phrases that should always be withheld for this reader. Use this for recurring spoiler names, events, or phrases that the sensitivity presets cannot express. Added values are treated as private: the page labels them only as redacted agent rules, and this call does not echo them back. Matching ignores case and never interprets regular-expression syntax. Call get_masking_report next to verify the new hidden count without exposing article text.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          words: {
+            type: "array",
+            minItems: 1,
+            maxItems: 20,
+            items: { type: "string", minLength: 1, maxLength: 200 },
+            description: "Literal spoiler words or phrases. They will not be echoed in the result or shown to the reader.",
+          },
+        },
+        required: ["words"],
+        additionalProperties: false,
+      },
+      execute: (input) => {
+        const supplied = Array.isArray(input.words) ? input.words : [];
+        const words = supplied
+          .filter((word): word is string => typeof word === "string")
+          .map((word) => word.trim())
+          .filter((word) => word.length > 0 && word.length <= 200)
+          .slice(0, 20);
+        if (words.length === 0) throw new Error("Add at least one non-empty word or phrase.");
+        const policy = context.policy();
+        const known = new Set(policy.exclusionRules.map(({ word }) => word.toLocaleLowerCase()));
+        const additions = words.filter((word) => {
+          const folded = word.toLocaleLowerCase();
+          if (known.has(folded)) return false;
+          known.add(folded);
+          return true;
+        });
+        const next: Policy = {
+          ...policy,
+          exclusionRules: [
+            ...policy.exclusionRules,
+            ...additions.map((word) => ({ word, source: "agent" as const })),
+          ],
+        };
+        context.setPolicy(next);
+        const article = context.article();
+        return {
+          added: additions.length,
+          total_agent_rules: next.exclusionRules.filter((rule) => rule.source === "agent").length,
+          sentences: article ? countSentences(article, next) : undefined,
+        };
+      },
+    },
+    {
       name: "get_masking_report",
       description:
-        "Audit what the reader is looking at: how many sentences are on their screen and how many are withheld, every decision apply_mask has made on this article and the reason you gave for it, and which sections read_article_content has read. No article text, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
+        "Audit what the reader is looking at: their sensitivity and excluded words, how many sentences are on their screen and how many are withheld, every decision apply_mask has made on this article and the reason you gave for it, and which sections read_article_content has read. No article text, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
@@ -286,6 +336,12 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const key = articleKey(article.lang, article.title);
         return {
           sensitivity: policy.sensitivity,
+          rules: {
+            reader_words: policy.exclusionRules
+              .filter((rule) => rule.source === "reader")
+              .map((rule) => rule.word),
+            agent_rules: policy.exclusionRules.filter((rule) => rule.source === "agent").length,
+          },
           sentences: countSentences(article, policy),
           decisions: decisionsOn(policy, key),
           sections_read: context.scanned(),
