@@ -1,8 +1,11 @@
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
+import type { Rule, RuleOrigin, RuleScope } from "./rules";
 import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
 
 const LANGS: Lang[] = ["en", "ja"];
+
+export const RULES_KEY = "unspoiled.rules";
 
 export type SharedArticle = { lang: Lang; title: string };
 
@@ -91,11 +94,116 @@ function isSameArticle(open: Article | null, opened: Article): boolean {
  * Sentence and section ids are positional, so every id in the policy belongs to
  * the article it was collected in. Opening a different article drops them all —
  * keeping them would hide unrelated sentences and, worse, unhide sections of the
- * new article that the reader never said they knew.
+ * new article that the reader never said they knew. Rules are phrases rather than
+ * ids, so the ones that apply to the article being opened come with it.
  */
-export function policyForOpened(policy: Policy, open: Article | null, opened: Article): Policy {
+export function policyForOpened(policy: Policy, open: Article | null, opened: Article, rules: Rule[]): Policy {
   if (isSameArticle(open, opened)) return policy;
-  return newPolicy(policy.sensitivity);
+  return newPolicy(policy.sensitivity, rules);
+}
+
+/**
+ * Every rule the reader has, split by where it applies: `all` follows them from article to
+ * article, and each entry of `byArticle` belongs to the one it was made on. Both live in one
+ * localStorage entry, because a rule is the reader's own setting and outlives the session.
+ */
+export type RuleStore = {
+  all: Rule[];
+  byArticle: Record<string, Rule[]>;
+};
+
+const NO_RULES: RuleStore = { all: [], byArticle: {} };
+
+const SCOPES: RuleScope[] = ["article", "all"];
+const ORIGINS: RuleOrigin[] = ["reader", "agent"];
+
+/**
+ * One stored entry, or null if it is not a rule. Nothing here is defensive about the page's own
+ * writing: localStorage is the reader's, an older version of this page may have written a different
+ * shape into it, and a rule that arrived broken must not decide what is on the screen.
+ */
+function asRule(value: unknown): Rule | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { id, phrases, label, scope, origin, reason, at } = value as Record<string, unknown>;
+  if (typeof id !== "string" || id === "") return null;
+  if (typeof label !== "string" || label.trim() === "") return null;
+  if (!Array.isArray(phrases)) return null;
+  const kept = phrases.filter((phrase): phrase is string => typeof phrase === "string" && phrase.trim() !== "");
+  if (kept.length !== phrases.length || kept.length === 0) return null;
+  if (!SCOPES.some((candidate) => candidate === scope)) return null;
+  if (!ORIGINS.some((candidate) => candidate === origin)) return null;
+  const rule: Rule = {
+    id,
+    phrases: kept,
+    label,
+    scope: scope as RuleScope,
+    origin: origin as RuleOrigin,
+    at: typeof at === "number" ? at : 0,
+  };
+  return typeof reason === "string" ? { ...rule, reason } : rule;
+}
+
+function asRules(value: unknown): Rule[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const rule = asRule(entry);
+    return rule ? [rule] : [];
+  });
+}
+
+export function readRuleStore(raw: string | null): RuleStore {
+  if (raw === null || raw === "") return NO_RULES;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return NO_RULES;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return NO_RULES;
+  const { all, byArticle } = parsed as Record<string, unknown>;
+  const buckets: Record<string, Rule[]> = {};
+  if (typeof byArticle === "object" && byArticle !== null && !Array.isArray(byArticle)) {
+    for (const [key, value] of Object.entries(byArticle)) {
+      const rules = asRules(value);
+      if (rules.length > 0) buckets[key] = rules;
+    }
+  }
+  return { all: asRules(all), byArticle: buckets };
+}
+
+/** The rules in force on the article on screen, or on the search screen the ones that always are. */
+export function rulesFor(store: RuleStore, article: SharedArticle | null): Rule[] {
+  const key = article ? articleKey(article.lang, article.title) : null;
+  return [...store.all, ...(key === null ? [] : (store.byArticle[key] ?? []))];
+}
+
+/** Every rule the reader holds, wherever it applies. Their names are counted past all of these. */
+export function allRules(store: RuleStore): Rule[] {
+  return [...store.all, ...Object.values(store.byArticle).flat()];
+}
+
+/**
+ * The store with these rules added, each one filed where its own scope says. A rule made for one
+ * article needs that article, so the key is only absent on the search screen, where the only scope
+ * the reader is offered is the one that follows them.
+ */
+export function storedWith(store: RuleStore, key: string | null, rules: readonly Rule[]): RuleStore {
+  const all = [...store.all];
+  const byArticle = { ...store.byArticle };
+  for (const rule of rules) {
+    if (rule.scope === "all" || key === null) all.push({ ...rule, scope: "all" });
+    else byArticle[key] = [...(byArticle[key] ?? []), rule];
+  }
+  return { all, byArticle };
+}
+
+export function storedWithout(store: RuleStore, id: string): RuleStore {
+  const byArticle: Record<string, Rule[]> = {};
+  for (const [key, rules] of Object.entries(store.byArticle)) {
+    const kept = rules.filter((rule) => rule.id !== id);
+    if (kept.length > 0) byArticle[key] = kept;
+  }
+  return { all: store.all.filter((rule) => rule.id !== id), byArticle };
 }
 
 export function scannedForArticle(scanned: ScannedSection[], article: Article | null): string[] {

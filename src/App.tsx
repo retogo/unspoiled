@@ -30,15 +30,24 @@ import {
   type Section,
   type Sentence,
 } from "./lib/segment";
+import { countMatching, nextRuleId, type Rule, type RuleScope } from "./lib/rules";
 import {
+  allRules,
+  articleKey,
   historyActionFor,
   policyForOpened,
   readArticleTarget,
+  readRuleStore,
   readSessionStart,
   recordScanned,
   revealedOnPage,
+  RULES_KEY,
+  rulesFor,
   scannedElsewhere,
   scannedForArticle,
+  storedWith,
+  storedWithout,
+  type RuleStore,
   type ScannedSection,
   type SectionDisclosure,
   type SharedArticle,
@@ -98,6 +107,12 @@ const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[
 const LANGUAGES: { lang: Lang; label: string; title: string }[] = [
   { lang: "en", label: "EN", title: "Search the English Wikipedia" },
   { lang: "ja", label: "JA", title: "Search the Japanese Wikipedia" },
+];
+
+/** Where a new rule applies. The article it was made on is the safer default, so it comes first. */
+const RULE_SCOPES: { scope: RuleScope; label: string }[] = [
+  { scope: "article", label: "This article only" },
+  { scope: "all", label: "Every article" },
 ];
 
 const THEMES: { choice: ThemeChoice; label: string }[] = [
@@ -164,6 +179,9 @@ export default function App() {
   const [scanned, setScanned] = useState<ScannedSection[]>([]);
   const [flowing, setFlowing] = useState<ReadonlyMap<string, FlowTiming>>(new Map());
   const [theme, setTheme] = useState<ThemeChoice>(() => readTheme(window.localStorage.getItem(THEME_KEY)));
+  const [ruleStore, setRuleStore] = useState<RuleStore>(() =>
+    readRuleStore(window.localStorage.getItem(RULES_KEY)),
+  );
 
   /*
    * The tools are handed to the browser once, on mount, and are called long afterwards, so they read
@@ -174,12 +192,14 @@ export default function App() {
   const articleRef = useRef<Article | null>(null);
   const policyRef = useRef<Policy>(policy);
   const scannedRef = useRef<ScannedSection[]>(scanned);
+  const ruleStoreRef = useRef<RuleStore>(ruleStore);
   const openRequestRef = useRef(0);
   const writtenRef = useRef<SharedArticle | null | undefined>(undefined);
   useLayoutEffect(() => {
     articleRef.current = article;
     policyRef.current = policy;
     scannedRef.current = scanned;
+    ruleStoreRef.current = ruleStore;
   });
 
   const openArticle = useCallback(async (nextLang: Lang, title: string): Promise<OpenResult> => {
@@ -192,7 +212,12 @@ export default function App() {
       const fetched = await fetchArticle(nextLang, title);
       if (openRequestRef.current !== request) return { status: "superseded" };
       const opened = segmentArticle(fetched);
-      const opening = policyForOpened(policyRef.current, articleRef.current, opened);
+      const opening = policyForOpened(
+        policyRef.current,
+        articleRef.current,
+        opened,
+        rulesFor(ruleStoreRef.current, opened),
+      );
       setArticle(opened);
       setPolicy(opening);
       setLoading(false);
@@ -212,6 +237,7 @@ export default function App() {
     setArticle(null);
     setError(null);
     setLoading(false);
+    setPolicy((current) => ({ ...current, rules: rulesFor(ruleStoreRef.current, null) }));
   }, []);
 
   useEffect(() => {
@@ -319,6 +345,46 @@ export default function App() {
     window.localStorage.setItem(SENSITIVITY_KEY, String(sensitivity));
     setPolicy((current) => ({ ...current, sensitivity }));
   }, []);
+
+  /**
+   * A rule is the reader's own setting rather than anything about the article, so it is written down
+   * as it is made, and the policy is handed whichever rules apply to what is on screen now.
+   */
+  const keepRules = useCallback((next: RuleStore) => {
+    window.localStorage.setItem(RULES_KEY, JSON.stringify(next));
+    setRuleStore(next);
+    setPolicy((current) => ({ ...current, rules: rulesFor(next, articleRef.current) }));
+  }, []);
+
+  const addRule = useCallback(
+    (phrase: string, scope: RuleScope) => {
+      const wanted = phrase.trim();
+      if (wanted === "") return;
+      const open = articleRef.current;
+      const store = ruleStoreRef.current;
+      const rule: Rule = {
+        id: nextRuleId(allRules(store)),
+        phrases: [wanted],
+        label: wanted,
+        scope: open ? scope : "all",
+        origin: "reader",
+        at: Date.now(),
+      };
+      keepRules(storedWith(store, open ? articleKey(open.lang, open.title) : null, [rule]));
+    },
+    [keepRules],
+  );
+
+  const removeRule = useCallback((id: string) => keepRules(storedWithout(ruleStoreRef.current, id)), [keepRules]);
+
+  /** Every sentence of the article as text, which is what a rule is matched against. */
+  const sentenceTexts = useMemo(
+    () =>
+      (article?.sections ?? []).flatMap((section) =>
+        section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((sentence) => sentence.text)),
+      ),
+    [article],
+  );
 
   /**
    * The reader reaching for a sentence lands in the same two sets the agent's decisions do, so a
@@ -507,6 +573,16 @@ export default function App() {
             </div>
           </section>
 
+          <Panel title="Always hide" count={policy.rules.length}>
+            <AlwaysHide
+              rules={policy.rules}
+              scoped={article !== null}
+              matched={(rule) => countMatching(rule, sentenceTexts)}
+              onAdd={addRule}
+              onRemove={removeRule}
+            />
+          </Panel>
+
           <Panel title="Your agent's decisions" count={policy.decisions.length}>
             <Decisions decisions={policy.decisions} />
           </Panel>
@@ -643,6 +719,108 @@ function Panel({ title, count, children }: { title: string; count: number; child
       </summary>
       {children}
     </details>
+  );
+}
+
+/**
+ * The phrases this reader never wants to meet. A rule is a phrase rather than a sentence id, so it
+ * holds over every sentence of the article and at every sensitivity, including the one that
+ * withholds nothing else. The reader can still tap a sentence back, and can take the rule down.
+ */
+function AlwaysHide({
+  rules,
+  scoped,
+  matched,
+  onAdd,
+  onRemove,
+}: {
+  rules: Rule[];
+  scoped: boolean;
+  matched: (rule: Rule) => number;
+  onAdd: (phrase: string, scope: RuleScope) => void;
+  onRemove: (id: string) => void;
+}) {
+  const [phrase, setPhrase] = useState("");
+  const [scope, setScope] = useState<RuleScope>("article");
+
+  return (
+    <section>
+      <h3 className="font-semibold">Always hide</h3>
+      <p className="mt-1 text-xs text-muted">
+        Every sentence carrying one of these comes off the page, whatever the slider says.
+      </p>
+      <input
+        aria-label="A word or phrase to always hide"
+        placeholder="A name, a place, an episode"
+        value={phrase}
+        onChange={(event) => setPhrase(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+          onAdd(phrase, scope);
+          setPhrase("");
+        }}
+        className="mt-1.5 w-full rounded-lg border border-edge bg-surface px-2.5 py-1.5 text-sm placeholder:text-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+      />
+      {/* A rule made where no article is open has no article to belong to, so it follows the reader. */}
+      {scoped && (
+        <div
+          role="group"
+          aria-label="Where a new phrase applies"
+          className="mt-1.5 flex gap-0.5 rounded-full bg-raised p-0.5"
+        >
+          {RULE_SCOPES.map((option) => (
+            <button
+              key={option.scope}
+              onClick={() => setScope(option.scope)}
+              aria-pressed={scope === option.scope}
+              className={`flex-1 rounded-full px-2 py-1 text-xs font-medium ${
+                scope === option.scope ? "bg-ink text-inverse" : "text-muted hover:text-ink"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {rules.length === 0 ? (
+        <p className="mt-1.5 text-xs text-muted">Nothing yet.</p>
+      ) : (
+        <ul aria-label="Phrases always hidden" className="mt-1.5 space-y-1 text-xs">
+          {rules.map((rule) => (
+            <RuleRow key={rule.id} rule={rule} matched={matched(rule)} onRemove={onRemove} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** One standing rule: what it is called, how far it reaches, and the button that takes it down. */
+function RuleRow({
+  rule,
+  matched,
+  onRemove,
+}: {
+  rule: Rule;
+  matched: number;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <li className="rounded-lg border border-line bg-surface px-2.5 py-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="min-w-0 font-medium break-words">{rule.label}</span>
+        <button
+          onClick={() => onRemove(rule.id)}
+          aria-label={`Stop hiding ${rule.label}`}
+          className="shrink-0 text-muted hover:text-ink"
+        >
+          Remove
+        </button>
+      </div>
+      <span className="block text-muted">
+        {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
+      </span>
+    </li>
   );
 }
 

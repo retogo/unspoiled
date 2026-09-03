@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Rule } from "./rules";
 import type { Section } from "./segment";
 import {
   assessSection,
@@ -283,6 +284,68 @@ describe("what overrides what", () => {
     expect(hiddenSentenceReason(firstSentence(meta), meta, policy)?.reason).toBe(
       "withheld by a decision on this page",
     );
+  });
+});
+
+describe("a rule the reader or their agent added", () => {
+  const meta = section("Production", ["The film was shot on location over eleven weeks."]);
+
+  function withRule(sensitivity: number, overrides: Partial<Rule> = {}): Policy {
+    return at(sensitivity, {
+      rules: [
+        {
+          id: "r1",
+          phrases: ["eleven weeks"],
+          label: "eleven weeks",
+          scope: "article",
+          origin: "reader",
+          at: 0,
+          ...overrides,
+        },
+      ],
+    });
+  }
+
+  it("withholds a sentence the wording rules found nothing wrong with", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, withRule(65))).toBe(true);
+  });
+
+  it("goes on withholding it where the page withholds nothing else", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, withRule(0))).toBe(true);
+  });
+
+  it("tells the reader it was their own rule, without repeating the phrase", () => {
+    const reason = hiddenSentenceReason(firstSentence(meta), meta, withRule(65))?.reason;
+    expect(reason).toBe("matches one of your rules");
+    expect(reason).not.toContain("eleven weeks");
+  });
+
+  it("says when the rule was one the agent added", () => {
+    const policy = withRule(65, { origin: "agent", label: "How long the shoot ran" });
+    expect(hiddenSentenceReason(firstSentence(meta), meta, policy)?.reason).toBe(
+      "matches a rule your agent added",
+    );
+  });
+
+  it("gives way to a sentence the reader has opened", () => {
+    const policy = { ...withRule(65), shown: new Set(["p0.0"]) };
+    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
+  });
+
+  it("gives way to a decision that opened the sentence", () => {
+    const policy = maskWith(withRule(65), ["p0.0"], []);
+    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
+  });
+
+  it("is outranked by a decision that closed the sentence", () => {
+    const policy = maskWith(withRule(0), [], ["p0.0"]);
+    expect(hiddenSentenceReason(firstSentence(meta), meta, policy)?.reason).toBe(
+      "withheld by a decision on this page",
+    );
+  });
+
+  it("starts the reader with none", () => {
+    expect(newPolicy().rules).toEqual([]);
   });
 });
 

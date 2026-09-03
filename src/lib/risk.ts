@@ -1,4 +1,5 @@
 import { strongestCategory, type SpoilerCategory } from "./categories";
+import { matchingRule, type Rule, type RuleOrigin } from "./rules";
 import type { Article, Section, Sentence } from "./segment";
 import { isLead } from "./segment";
 
@@ -155,13 +156,19 @@ export type Policy = {
   shown: Set<string>;
   /** Sentences a decision closed. Hiding beats showing, and both beat the wording rules. */
   hidden: Set<string>;
+  /**
+   * Phrases the reader, or their agent, said to withhold wherever they appear. They outrank the
+   * wording rules and the slider, and are outranked by anything either party said about a sentence
+   * in particular.
+   */
+  rules: Rule[];
   decisions: Decision[];
 };
 
 export const DEFAULT_SENSITIVITY = 65;
 
-export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY): Policy {
-  return { sensitivity, shown: new Set(), hidden: new Set(), decisions: [] };
+export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY, rules: Rule[] = []): Policy {
+  return { sensitivity, shown: new Set(), hidden: new Set(), rules, decisions: [] };
 }
 
 /**
@@ -190,13 +197,26 @@ const HIDDEN_BY_DECISION: Assessment = {
 };
 
 /**
- * A decision outranks the wording rules in both directions, so an agent that has read the article
- * can open what the rules over-withheld and close what they missed. The sensitivity slider is the
- * page's own judgement, and it only decides the sentences no decision has reached.
+ * A rule says nothing about which sentence it will reach, so the reader is told whose rule caught
+ * this one and no more: the phrase itself can be the spoiler, and so can the label an agent gave it.
+ */
+const HIDDEN_BY_RULE: Record<RuleOrigin, Assessment> = {
+  reader: { level: "spoiler", risk: CERTAIN, reason: "matches one of your rules" },
+  agent: { level: "spoiler", risk: CERTAIN, reason: "matches a rule your agent added" },
+};
+
+/**
+ * What decides whether a sentence shows, in order. A decision about this sentence outranks
+ * everything, in both directions: an agent that has read the article can open what the page
+ * over-withheld and close what it missed, and a tap does the same for the reader. A standing rule
+ * comes next, and holds at every sensitivity — a reader who never wants to see a name does not want
+ * to see it at zero either. The slider is the page's own judgement and decides the rest.
  */
 export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
   if (policy.hidden.has(sentence.id)) return HIDDEN_BY_DECISION;
   if (policy.shown.has(sentence.id)) return null;
+  const rule = matchingRule(sentence.text, policy.rules);
+  if (rule) return HIDDEN_BY_RULE[rule.origin];
   const assessment = assessSentences(section).get(sentence.id);
   if (!assessment) return null;
   return assessment.risk > CERTAIN - policy.sensitivity ? assessment : null;

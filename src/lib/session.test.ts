@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
+import type { Rule, RuleScope } from "./rules";
 import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
+  allRules,
   articleKey,
   historyActionFor,
   policyForOpened,
   readArticleTarget,
+  readRuleStore,
   readSessionStart,
   recordScanned,
   revealedOnPage,
+  rulesFor,
   scannedElsewhere,
   scannedForArticle,
+  storedWith,
+  storedWithout,
+  type RuleStore,
 } from "./session";
 
 function article(lang: Lang, title: string, sections: Section[] = []): Article {
@@ -43,8 +50,13 @@ const usedPolicy: Policy = {
   sensitivity: 50,
   shown: new Set(["p1.0"]),
   hidden: new Set(["p2.1"]),
+  rules: [],
   decisions: [{ at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" }],
 };
+
+function rule(id: string, phrase: string, scope: RuleScope = "article"): Rule {
+  return { id, phrases: [phrase], label: phrase, scope, origin: "reader", at: 0 };
+}
 
 describe("readSessionStart", () => {
   it("keeps the reader's stored sensitivity instead of the one in a shared link", () => {
@@ -100,27 +112,113 @@ describe("readSessionStart", () => {
 
 describe("policyForOpened", () => {
   it("clears everything tied to the previous article's sentence ids", () => {
-    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
+    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"), []);
     expect(next).toEqual(newPolicy(50));
   });
 
   it("keeps the reader's sensitivity, which is not tied to any article", () => {
-    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"));
+    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"), []);
     expect(next.sensitivity).toBe(50);
   });
 
   it("keeps what the reader has opened when the same article is opened again", () => {
     const open = article("en", "Attack on Titan");
-    expect(policyForOpened(usedPolicy, open, article("en", "Attack on Titan"))).toBe(usedPolicy);
+    expect(policyForOpened(usedPolicy, open, article("en", "Attack on Titan"), [])).toBe(usedPolicy);
   });
 
   it("treats the same title in another language as another article", () => {
-    const next = policyForOpened(usedPolicy, article("en", "The Sixth Sense"), article("ja", "The Sixth Sense"));
+    const next = policyForOpened(usedPolicy, article("en", "The Sixth Sense"), article("ja", "The Sixth Sense"), []);
     expect(next.shown.size).toBe(0);
   });
 
   it("clears the previous article's state when the first article is opened", () => {
-    expect(policyForOpened(usedPolicy, null, article("en", "The Sixth Sense")).hidden.size).toBe(0);
+    expect(policyForOpened(usedPolicy, null, article("en", "The Sixth Sense"), []).hidden.size).toBe(0);
+  });
+
+  it("carries the rules that apply to the article being opened", () => {
+    const rules = [rule("r1", "Levi", "all")];
+    const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"), rules);
+    expect(next.rules).toEqual(rules);
+  });
+});
+
+describe("the rules the reader has stored", () => {
+  const titan = articleKey("en", "Attack on Titan");
+  const stored: RuleStore = {
+    all: [rule("r1", "Levi", "all")],
+    byArticle: { [titan]: [rule("r2", "Eren")] },
+  };
+
+  it("keeps a rule through a round trip", () => {
+    expect(readRuleStore(JSON.stringify(stored))).toEqual(stored);
+  });
+
+  it.each(["", "not json", "null", "[]", '"a phrase"', '{"all":3}', '{"byArticle":[]}'])(
+    "ignores %s, which is not a set of rules",
+    (raw) => {
+      expect(readRuleStore(raw)).toEqual({ all: [], byArticle: {} });
+    },
+  );
+
+  it("reads nothing for a reader who has stored nothing", () => {
+    expect(readRuleStore(null)).toEqual({ all: [], byArticle: {} });
+  });
+
+  it.each([
+    { phrases: ["Levi"], label: "Levi", scope: "all", origin: "reader", at: 0 },
+    { id: "r1", label: "Levi", scope: "all", origin: "reader", at: 0 },
+    { id: "r1", phrases: [], label: "Levi", scope: "all", origin: "reader", at: 0 },
+    { id: "r1", phrases: ["Levi"], label: "  ", scope: "all", origin: "reader", at: 0 },
+    { id: "r1", phrases: ["Levi"], label: "Levi", scope: "everywhere", origin: "reader", at: 0 },
+    { id: "r1", phrases: ["Levi"], label: "Levi", scope: "all", origin: "someone else", at: 0 },
+    { id: "r1", phrases: [7], label: "Levi", scope: "all", origin: "reader", at: 0 },
+  ])("drops a stored entry that is not a rule", (entry) => {
+    expect(readRuleStore(JSON.stringify({ all: [entry], byArticle: {} })).all).toEqual([]);
+  });
+
+  it("keeps the rules that are rules alongside one that is not", () => {
+    const raw = JSON.stringify({ all: [rule("r1", "Levi", "all"), { id: "r2" }], byArticle: {} });
+    expect(readRuleStore(raw).all).toEqual([rule("r1", "Levi", "all")]);
+  });
+
+  it("applies an every-article rule whatever is open", () => {
+    expect(rulesFor(stored, { lang: "en", title: "The Sixth Sense" })).toEqual([rule("r1", "Levi", "all")]);
+  });
+
+  it("applies a rule made on one article only while that article is open", () => {
+    expect(rulesFor(stored, { lang: "en", title: "Attack on Titan" })).toEqual([
+      rule("r1", "Levi", "all"),
+      rule("r2", "Eren"),
+    ]);
+  });
+
+  it("applies the every-article rules on the search screen", () => {
+    expect(rulesFor(stored, null)).toEqual([rule("r1", "Levi", "all")]);
+  });
+
+  it("counts every stored rule, wherever it applies", () => {
+    expect(allRules(stored).map((entry) => entry.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("puts a new rule where its scope says it belongs", () => {
+    const next = storedWith(stored, titan, [rule("r3", "Mikasa"), rule("r4", "Hange", "all")]);
+    expect(next.byArticle[titan].map((entry) => entry.id)).toEqual(["r2", "r3"]);
+    expect(next.all.map((entry) => entry.id)).toEqual(["r1", "r4"]);
+  });
+
+  it("starts an article's list with the first rule made on it", () => {
+    const key = articleKey("en", "The Sixth Sense");
+    expect(storedWith(stored, key, [rule("r3", "Cole")]).byArticle[key]).toEqual([rule("r3", "Cole")]);
+  });
+
+  it("leaves the store it was given alone", () => {
+    storedWith(stored, titan, [rule("r3", "Mikasa")]);
+    expect(allRules(stored).map((entry) => entry.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("takes a rule out of whichever list holds it", () => {
+    expect(allRules(storedWithout(stored, "r1")).map((entry) => entry.id)).toEqual(["r2"]);
+    expect(allRules(storedWithout(stored, "r2")).map((entry) => entry.id)).toEqual(["r1"]);
   });
 });
 
