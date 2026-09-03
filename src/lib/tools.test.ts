@@ -4,7 +4,10 @@ import { newPolicy, type Policy } from "./risk";
 import { buildTools } from "./tools";
 
 function paragraph(id: string, texts: string[]): Paragraph {
-  return { id, sentences: texts.map((text, index) => ({ id: `${id}.${index}`, text })) };
+  return {
+    id,
+    sentences: texts.map((text, index) => ({ id: `${id}.${index}`, text, runs: [{ kind: "text", text }] })),
+  };
 }
 
 function fightClub(): Article {
@@ -13,6 +16,7 @@ function fightClub(): Article {
     title: "Fight Club (film)",
     displayTitle: "Fight Club (film)",
     sourceUrl: "https://en.wikipedia.org/wiki/Fight_Club_(film)",
+    references: [],
     sections: [
       {
         id: "s0",

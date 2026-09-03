@@ -18,7 +18,7 @@ function section(heading: string, texts: string[] = ["The film was shot on locat
     heading,
     headingPath: [heading],
     level: 2,
-    paragraphs: [{ id: "p0", sentences: texts.map((text, index) => ({ id: `p0.${index}`, text })) }],
+    paragraphs: [{ id: "p0", sentences: texts.map((text, index) => ({ id: `p0.${index}`, text, runs: [{ kind: "text", text }] })) }],
   };
 }
 
@@ -270,6 +270,7 @@ describe("counting what is withheld", () => {
     title: "The Sixth Sense",
     displayTitle: "The Sixth Sense",
     sourceUrl: "https://en.wikipedia.org/wiki/The_Sixth_Sense",
+    references: [],
     sections: [
       section("Production", ["The film was shot on location over eleven weeks."]),
       {
