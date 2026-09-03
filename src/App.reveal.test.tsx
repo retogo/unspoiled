@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { flowPieces, flowStart } from "./lib/flow";
+import { flowPieces, flowStarts } from "./lib/flow";
 
 const HTML = `<div class="mw-parser-output">
   <p>The Sixth Sense is a 1999 American supernatural thriller film.</p>
@@ -109,9 +109,10 @@ describe("a sentence the reader has just opened", () => {
     await revealParagraph(1);
 
     const delays = flowDelays();
-    const second = flowPieces(OPENING, "en").length;
+    const counts = [OPENING, SECOND].map((text) => flowPieces(text, "en").length);
+    const second = counts[0];
     expect(delays[0]).toBe(0);
-    expect(delays[second]).toBe(flowStart(1, 2));
+    expect(delays[second]).toBe(flowStarts(counts)[1]);
     expect(isAscending(delays)).toBe(true);
   });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { flowDelay, flowPieces, flowStart } from "./lib/flow";
+import { flowDelay, flowRuns, flowStarts, flowWords } from "./lib/flow";
 import { maskRows } from "./lib/mask";
 import {
   assessSection,
@@ -74,6 +74,21 @@ function sensitivityHint(sensitivity: number): string {
   if (sensitivity < 50) return "Withholds the later half of each plot summary, and outright reveals.";
   if (sensitivity < 75) return "Withholds plot summaries, and sentences that state a reveal outright.";
   return "Withholds plot summaries, analysis, and any wording that hints at the ending.";
+}
+
+/**
+ * The runs of every sentence and every heading, under the id the policy knows it by, so a reveal can
+ * be timed from the length of what it opened.
+ */
+function runsById(article: Article | null): Map<string, Run[]> {
+  const runs = new Map<string, Run[]>();
+  for (const section of article?.sections ?? []) {
+    runs.set(headingId(section), [{ kind: "text", text: sectionHeading(section) }]);
+    for (const paragraph of section.paragraphs) {
+      for (const sentence of paragraph.sentences) runs.set(sentence.id, sentence.runs);
+    }
+  }
+  return runs;
 }
 
 function sentenceCount(sentences: number): string {
@@ -242,8 +257,8 @@ export default function App() {
   /**
    * Which sentences arrive a word at a time, and when each of them begins. Opening one is a
    * deliberate act — a button here, or a reveal tool — and worth watching arrive, one sentence after
-   * another. The slider can open hundreds at once and never touches `revealed`, so those keep the
-   * plain fade.
+   * another, each waiting only as long as the sentence in front of it actually runs. The slider can
+   * open hundreds at once and never touches `revealed`, so those keep the plain fade.
    */
   const revealedBefore = useRef(policy.revealed);
   useEffect(() => {
@@ -252,10 +267,14 @@ export default function App() {
     const opened = [...policy.revealed].filter((id) => !before.has(id));
     const closed = [...before].filter((id) => !policy.revealed.has(id));
     if (opened.length === 0 && closed.length === 0) return;
+    const article = articleRef.current;
+    const runs = runsById(article);
+    const lang = article?.lang ?? "en";
     setFlowing((current) => {
       const next = new Map(current);
       for (const id of closed) next.delete(id);
-      opened.forEach((id, order) => next.set(id, flowStart(order, opened.length)));
+      const starts = flowStarts(opened.map((id) => flowWords(flowRuns(runs.get(id) ?? [], lang))));
+      opened.forEach((id, order) => next.set(id, starts[order]));
       return next;
     });
   }, [policy.revealed]);
@@ -902,8 +921,8 @@ function FlowingText({
   onOpen: (title: string) => void;
 }) {
   const timed = useMemo(() => {
-    const split = runs.map((run) => (run.kind === "note" ? [run.text] : flowPieces(run.text, lang)));
-    const count = split.reduce((total, pieces) => total + pieces.length, 0);
+    const split = flowRuns(runs, lang);
+    const count = flowWords(split);
     let index = 0;
     return split.map((pieces) =>
       pieces.map((piece) => ({ piece, delay: flowDelay(index++, count, start) })),

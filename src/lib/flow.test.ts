@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLOW_PIECE_MS, flowDelay, flowPieces, flowStart } from "./flow";
+import { FLOW_PIECE_MS, flowDelay, flowPieces, flowStarts } from "./flow";
 
 describe("splitting a sentence into the pieces that arrive", () => {
   it("keeps every character of the sentence", () => {
@@ -51,33 +51,56 @@ describe("when each piece of an opened sentence arrives", () => {
 });
 
 describe("when each sentence of one reveal begins", () => {
-  const LONGEST = 40;
+  const BATCH_MS = 2800;
 
-  /** The moment the last word of a sentence that began at `start` has finished arriving. */
-  function arrived(start: number): number {
-    return flowDelay(LONGEST - 1, LONGEST, start) + FLOW_PIECE_MS;
-  }
-
-  it("starts the first sentence immediately", () => {
-    expect(flowStart(0, 3)).toBe(0);
-  });
-
-  it("waits for the sentence before it to have finished arriving", () => {
-    expect(flowStart(1, 3)).toBeGreaterThanOrEqual(arrived(flowStart(0, 3)));
-    expect(flowStart(2, 3)).toBeGreaterThanOrEqual(arrived(flowStart(1, 3)));
-  });
+  /** How long a sentence of `count` words spends arriving, and when its last word has resolved. */
+  const spread = (count: number) => flowDelay(count - 1, count, 0);
+  const arrived = (start: number, count: number) => start + spread(count) + FLOW_PIECE_MS;
 
   it("opens a single sentence with no wait at all", () => {
-    expect(flowStart(0, 1)).toBe(0);
+    expect(flowStarts([9])).toEqual([0]);
   });
 
-  it("keeps a reveal of many sentences inside the time a reader will wait", () => {
-    for (const opened of [2, 4, 8, 20]) {
-      expect(arrived(flowStart(opened - 1, opened))).toBeLessThanOrEqual(2800);
+  it("follows a short sentence closely rather than waiting out a length it never used", () => {
+    const [first, second] = flowStarts([3, 3, 3]);
+
+    expect(first).toBe(0);
+    expect(second).toBeLessThan(spread(3) + FLOW_PIECE_MS);
+  });
+
+  it("waits longer after a long sentence than after a short one, by exactly its extra spread", () => {
+    const afterLong = flowStarts([20, 5])[1];
+    const afterShort = flowStarts([4, 5])[1];
+
+    expect(afterLong - afterShort).toBe(spread(20) - spread(4));
+  });
+
+  it("times a sentence by the one before it, never by its own length", () => {
+    expect(flowStarts([6, 3])[1]).toBe(flowStarts([6, 30])[1]);
+  });
+
+  it("runs forward, each step as long as the sentence it waits for", () => {
+    const [first, second, third] = flowStarts([3, 12, 3]);
+
+    expect(second - first).toBeLessThan(third - second);
+  });
+
+  it("keeps the whole reveal inside the time a reader will wait", () => {
+    for (const opened of [2, 5, 12, 30]) {
+      const counts = Array.from({ length: opened }, (_, index) => 6 + (index % 7) * 3);
+      const starts = flowStarts(counts);
+
+      expect(arrived(starts[opened - 1], counts[opened - 1])).toBeLessThanOrEqual(BATCH_MS);
+      expect(starts[opened - 1]).toBeLessThanOrEqual(BATCH_MS - spread(counts[opened - 1]));
     }
   });
 
-  it("tightens the gap once a reveal opens more sentences than fit one after another", () => {
-    expect(flowStart(1, 20)).toBeLessThan(flowStart(1, 3));
+  /** Whole milliseconds are all a delay can carry, so the pacing is kept to within a few percent. */
+  it("keeps the long and short of a reveal in proportion when it has to tighten", () => {
+    const alternating = (opened: number) =>
+      Array.from({ length: opened }, (_, index) => (index % 2 === 0 ? 4 : 20));
+    const paced = (starts: number[]) => (starts[2] - starts[1]) / (starts[1] - starts[0]);
+
+    expect(paced(flowStarts(alternating(20)))).toBeCloseTo(paced(flowStarts(alternating(3))), 1);
   });
 });
