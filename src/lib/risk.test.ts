@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Section } from "./segment";
 import {
+  assessHeading,
   assessSection,
-  assessSentence,
-  defaultPolicy,
+  assessSentences,
+  countHidden,
   headingId,
   hiddenHeading,
   hiddenSentence,
+  newPolicy,
   type Policy,
 } from "./risk";
 
@@ -22,6 +24,16 @@ function section(heading: string, texts: string[] = ["The film was shot on locat
 
 function firstSentence(target: Section) {
   return target.paragraphs[0].sentences[0];
+}
+
+function assessmentAt(target: Section, index = 0) {
+  const assessment = assessSentences(target).get(`p0.${index}`);
+  if (!assessment) throw new Error(`No assessment for p0.${index}`);
+  return assessment;
+}
+
+function at(sensitivity: number, overrides: Partial<Policy> = {}): Policy {
+  return { ...newPolicy(sensitivity), ...overrides };
 }
 
 describe("assessment reasons", () => {
@@ -43,7 +55,7 @@ describe("assessment reasons", () => {
 
   it("does not repeat the heading when a sentence carries reveal wording", () => {
     const target = section("Series finale", ["The twist is that he had been dead the whole time."]);
-    expect(assessSentence(firstSentence(target), target).reason).not.toContain("finale");
+    expect(assessmentAt(target).reason).not.toContain("finale");
   });
 });
 
@@ -74,99 +86,203 @@ describe("reveal wording", () => {
     "The film was released in 1999 and became a sleeper hit.",
   ])("leaves %s alone", (text) => {
     const target = section("Release", [text]);
-    expect(assessSentence(firstSentence(target), target).level).toBe("safe");
+    expect(assessmentAt(target).level).toBe("safe");
+    expect(assessmentAt(target).risk).toBe(0);
   });
 });
 
-describe("policy levels", () => {
-  const at = (level: Policy["level"]): Policy => ({ ...defaultPolicy, level });
+describe("how a sentence is scored", () => {
+  it("opens a plot summary from the front: the first sentence scores lowest, the last scores highest", () => {
+    const plot = section("Plot", [
+      "A boy who sees ghosts meets a child psychologist.",
+      "They meet again through the winter.",
+      "The boy tells his mother what he sees.",
+      "The psychologist goes home for the last time.",
+      "He accepts what has happened and moves on.",
+    ]);
+    const scores = [0, 1, 2, 3, 4].map((index) => assessmentAt(plot, index).risk);
+    expect(scores).toEqual([60, 70, 80, 90, 100]);
+  });
 
-  it("rates a sentence that states the reveal outright as a spoiler", () => {
+  it("scores a plot section of one sentence as the ending itself", () => {
+    const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
+    expect(assessmentAt(plot).risk).toBe(100);
+  });
+
+  it("scores every sentence of an analysis section alike", () => {
+    const themes = section("Themes", [
+      "Critics read the film as a study of grief.",
+      "Others place it in a longer tradition of ghost stories.",
+    ]);
+    expect(assessmentAt(themes, 0).risk).toBe(70);
+    expect(assessmentAt(themes, 1).risk).toBe(70);
+  });
+
+  it("scores a sentence that states the reveal outright as a near certainty", () => {
     const target = section("Reception", ["Reviewers dwelt on the twist, that the narrator and Tyler are one man."]);
-    expect(assessSentence(firstSentence(target), target).level).toBe("spoiler");
+    expect(assessmentAt(target)).toMatchObject({ level: "spoiler", risk: 85 });
   });
 
-  it("rates a weaker hint as suspect", () => {
+  it("scores a weaker hint well below an outright reveal", () => {
     const target = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
-    expect(assessSentence(firstSentence(target), target).level).toBe("suspect");
+    expect(assessmentAt(target)).toMatchObject({ level: "suspect", risk: 40 });
   });
 
-  it("withholds the reveal inside a non-narrative section at balanced", () => {
-    const target = section("Reception", ["Reviewers dwelt on the twist, that the narrator and Tyler are one man."]);
-    expect(hiddenSentence(firstSentence(target), target, at("balanced"))).toBe(true);
+  it("raises an analysis sentence that also states the reveal outright", () => {
+    const target = section("Themes", ["The twist is what the film is finally about."]);
+    expect(assessmentAt(target).risk).toBe(85);
   });
 
-  it("shows a weaker hint at balanced but withholds it at strict", () => {
-    const target = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
-    expect(hiddenSentence(firstSentence(target), target, at("balanced"))).toBe(false);
-    expect(hiddenSentence(firstSentence(target), target, at("strict"))).toBe(true);
+  it("keeps the higher score when a plot sentence also hints at the ending", () => {
+    const plot = section("Plot", [
+      "The boy tells his mother what he sees.",
+      "The ending leaves him at peace.",
+    ]);
+    expect(assessmentAt(plot, 1).risk).toBe(100);
+    expect(assessmentAt(plot, 1).level).toBe("spoiler");
   });
 
-  it("withholds narrative sections at balanced", () => {
-    const target = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
-    expect(hiddenSentence(firstSentence(target), target, at("balanced"))).toBe(true);
+  it("scores a heading that names the reveal, and leaves other headings unscored", () => {
+    expect(assessHeading(section("Series finale"))).toMatchObject({ risk: 85 });
+    expect(assessHeading(section("Production"))).toBeNull();
+  });
+});
+
+describe("the sensitivity threshold", () => {
+  const themes = section("Themes", ["Critics read the film as a study of grief."]);
+
+  it("shows a sentence whose risk exactly matches the threshold", () => {
+    expect(hiddenSentence(firstSentence(themes), themes, at(30))).toBe(false);
   });
 
-  it("withholds nothing at open", () => {
-    const target = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
-    expect(hiddenSentence(firstSentence(target), target, at("open"))).toBe(false);
+  it("withholds a sentence one point above the threshold", () => {
+    expect(hiddenSentence(firstSentence(themes), themes, at(31))).toBe(true);
+  });
+
+  it("withholds nothing at all at zero", () => {
+    const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
+    expect(hiddenSentence(firstSentence(plot), plot, at(0))).toBe(false);
+  });
+
+  it("withholds every sentence that carries any risk at all at one hundred", () => {
+    const hint = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
+    const meta = section("Production", ["The film was shot on location over eleven weeks."]);
+    expect(hiddenSentence(firstSentence(hint), hint, at(100))).toBe(true);
+    expect(hiddenSentence(firstSentence(meta), meta, at(100))).toBe(false);
+  });
+});
+
+describe("the presets on the slider", () => {
+  const reveal = section("Reception", ["Reviewers dwelt on the twist, that the narrator and Tyler are one man."]);
+  const hint = section("Reception", ["Reviewers praised the ending as the strongest part of the film."]);
+  const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
+
+  it("withholds plot summaries and outright reveals at fifty, but not weaker hints", () => {
+    expect(hiddenSentence(firstSentence(plot), plot, at(50))).toBe(true);
+    expect(hiddenSentence(firstSentence(reveal), reveal, at(50))).toBe(true);
+    expect(hiddenSentence(firstSentence(hint), hint, at(50))).toBe(false);
+  });
+
+  it("withholds the weaker hint too at seventy-five", () => {
+    expect(hiddenSentence(firstSentence(hint), hint, at(75))).toBe(true);
+  });
+
+  it("withholds nothing at zero", () => {
+    expect(hiddenSentence(firstSentence(reveal), reveal, at(0))).toBe(false);
+    expect(hiddenSentence(firstSentence(hint), hint, at(0))).toBe(false);
+  });
+
+  it("starts the reader at seventy-five", () => {
+    expect(newPolicy().sensitivity).toBe(75);
   });
 });
 
 describe("what overrides what", () => {
   const meta = section("Production", ["The film was shot on location over eleven weeks."]);
   const plot = section("Plot", ["A boy who sees ghosts meets a child psychologist."]);
-  const known = [{ sectionId: meta.id, because: "you have seen it" }];
+  const known = new Map([[meta.id, "you have seen it"]]);
 
   it("withholds a sentence the agent asked to withhold", () => {
-    const policy = { ...defaultPolicy, withheld: ["p0.0"] };
-    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(true);
+    expect(hiddenSentence(firstSentence(meta), meta, at(75, { withheld: new Set(["p0.0"]) }))).toBe(true);
   });
 
-  it("shows an agent-withheld sentence at open", () => {
-    const policy: Policy = { ...defaultPolicy, level: "open", withheld: ["p0.0"] };
-    expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
+  it("keeps withholding it at the lowest sensitivity that withholds anything", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, at(1, { withheld: new Set(["p0.0"]) }))).toBe(true);
+  });
+
+  it("shows an agent-withheld sentence at zero", () => {
+    expect(hiddenSentence(firstSentence(meta), meta, at(0, { withheld: new Set(["p0.0"]) }))).toBe(false);
   });
 
   it("shows an agent-withheld sentence once the section is marked known", () => {
-    const policy = { ...defaultPolicy, withheld: ["p0.0"], knownSections: known };
+    const policy = at(75, { withheld: new Set(["p0.0"]), knownSections: known });
     expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
   });
 
   it("shows an agent-withheld sentence the reader then revealed", () => {
-    const policy = { ...defaultPolicy, withheld: ["p0.0"], revealed: ["p0.0"] };
+    const policy = at(75, { withheld: new Set(["p0.0"]), revealed: new Set(["p0.0"]) });
     expect(hiddenSentence(firstSentence(meta), meta, policy)).toBe(false);
   });
 
+  it("shows a revealed sentence at the highest sensitivity", () => {
+    expect(hiddenSentence(firstSentence(plot), plot, at(100, { revealed: new Set(["p0.0"]) }))).toBe(false);
+  });
+
   it("withholds a heading the agent asked to withhold", () => {
-    const policy = { ...defaultPolicy, withheld: [headingId(meta)] };
-    expect(hiddenHeading(meta, policy)).not.toBeNull();
+    expect(hiddenHeading(meta, at(75, { withheld: new Set([headingId(meta)]) }))).not.toBeNull();
   });
 
   it("says why a heading is withheld without naming it", () => {
-    const policy = { ...defaultPolicy, withheld: [headingId(meta)] };
+    const policy = at(75, { withheld: new Set([headingId(meta)]) });
     expect(hiddenHeading(meta, policy)?.reason).not.toContain("Production");
   });
 
-  it("shows an agent-withheld heading at open", () => {
-    const policy: Policy = { ...defaultPolicy, level: "open", withheld: [headingId(meta)] };
-    expect(hiddenHeading(meta, policy)).toBeNull();
+  it("shows an agent-withheld heading at zero", () => {
+    expect(hiddenHeading(meta, at(0, { withheld: new Set([headingId(meta)]) }))).toBeNull();
   });
 
   it("shows an agent-withheld heading once revealed", () => {
-    const policy = { ...defaultPolicy, withheld: [headingId(meta)], revealed: [headingId(meta)] };
-    expect(hiddenHeading(meta, policy)).toBeNull();
+    const ids = new Set([headingId(meta)]);
+    expect(hiddenHeading(meta, at(75, { withheld: ids, revealed: ids }))).toBeNull();
   });
 
   it("shows an agent-withheld heading once the section is marked known", () => {
-    const policy = { ...defaultPolicy, withheld: [headingId(meta)], knownSections: known };
+    const policy = at(75, { withheld: new Set([headingId(meta)]), knownSections: known });
     expect(hiddenHeading(meta, policy)).toBeNull();
   });
 
   it("keeps withholding a narrative heading that names the reveal", () => {
     const finale = section("Series finale", ["He was dead the whole time."]);
-    expect(hiddenHeading(finale, defaultPolicy)?.reason).toBe("the heading itself names the reveal");
-    expect(hiddenHeading(plot, defaultPolicy)).toBeNull();
+    expect(hiddenHeading(finale, newPolicy())?.reason).toBe("the heading itself names the reveal");
+    expect(hiddenHeading(plot, newPolicy())).toBeNull();
+  });
+
+  it("shows a heading that names the reveal once the sensitivity drops below its score", () => {
+    const finale = section("Series finale", ["He was dead the whole time."]);
+    expect(hiddenHeading(finale, at(15))).toBeNull();
+    expect(hiddenHeading(finale, at(16))).not.toBeNull();
+  });
+});
+
+describe("counting what is withheld", () => {
+  const article = {
+    lang: "en" as const,
+    title: "The Sixth Sense",
+    displayTitle: "The Sixth Sense",
+    sourceUrl: "https://en.wikipedia.org/wiki/The_Sixth_Sense",
+    sections: [
+      section("Production", ["The film was shot on location over eleven weeks."]),
+      {
+        ...section("Plot", ["A boy meets a psychologist.", "The psychologist goes home."]),
+        id: "s2",
+      },
+    ],
+  };
+
+  it("counts fewer withheld sentences as the reader lowers the slider", () => {
+    expect(countHidden(article, newPolicy(75))).toEqual({ hidden: 2, total: 3 });
+    expect(countHidden(article, newPolicy(35))).toEqual({ hidden: 1, total: 3 });
+    expect(countHidden(article, newPolicy(0))).toEqual({ hidden: 0, total: 3 });
   });
 });
 
@@ -176,11 +292,11 @@ describe("wording that reads like a reveal but is not", () => {
     "Fincher revealed that the studio had asked for a softer ending.",
   ])("treats %s as a hint at most", (text) => {
     const target = section("Casting", [text]);
-    expect(assessSentence(firstSentence(target), target).level).toBe("suspect");
+    expect(assessmentAt(target).level).toBe("suspect");
   });
 
   it("still catches the passive reveal a plot summary uses", () => {
     const target = section("Reception", ["It is revealed that the narrator has been alone the whole time."]);
-    expect(assessSentence(firstSentence(target), target).level).toBe("spoiler");
+    expect(assessmentAt(target).level).toBe("spoiler");
   });
 });

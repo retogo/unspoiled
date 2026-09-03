@@ -27,7 +27,7 @@ async function openArticle() {
     configurable: true,
     value: { registerTool: (tool: RegisteredTool) => registered.push(tool) },
   });
-  window.history.replaceState(null, "", "?title=Test&lang=en&level=strict");
+  window.history.replaceState(null, "", "?title=Test&lang=en&sensitivity=75");
   render(<App />);
   await screen.findByRole("heading", { name: "Test article" });
 

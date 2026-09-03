@@ -175,7 +175,7 @@ describe("opening another article", () => {
 
     await openArticle(registered, "en", "Attack on Titan");
     await callTool(registered, "set_spoiler_policy", {
-      level: "strict",
+      sensitivity: 75,
       already_knows: ["read the original manga"],
     });
     expect(screen.getByText("read the original manga")).toBeTruthy();
@@ -185,16 +185,16 @@ describe("opening another article", () => {
     expect(screen.queryByText("read the original manga")).toBeNull();
   });
 
-  it("keeps the reader's policy level, which belongs to the reader and not the article", async () => {
+  it("keeps the reader's sensitivity, which belongs to the reader and not the article", async () => {
     const registered = await renderWithAgent();
 
     await openArticle(registered, "en", "Attack on Titan");
-    await callTool(registered, "set_spoiler_policy", { level: "balanced" });
+    await callTool(registered, "set_spoiler_policy", { sensitivity: 50 });
 
     await openArticle(registered, "en", "The Sixth Sense");
 
     const outline = await callTool(registered, "get_article_outline");
-    expect(outline.policy_level).toBe("balanced");
+    expect(outline.sensitivity).toBe(50);
   });
 
   it("keeps what the reader has opened when the same article is opened again", async () => {
@@ -388,34 +388,34 @@ describe("the record of what the agent has read", () => {
 });
 
 describe("a shared link", () => {
-  it("does not override the level the reader has stored", async () => {
-    window.localStorage.setItem("unspoiled.level", "strict");
-    window.history.replaceState(null, "", "/?level=open&title=Attack%20on%20Titan");
+  it("does not override the sensitivity the reader has stored", async () => {
+    window.localStorage.setItem("unspoiled.sensitivity", "75");
+    window.history.replaceState(null, "", "/?sensitivity=0&title=Attack%20on%20Titan");
 
     const registered = await renderWithAgent();
     await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
 
     const outline = await callTool(registered, "get_article_outline");
-    expect(outline.policy_level).toBe("strict");
+    expect(outline.sensitivity).toBe(75);
     expect(screen.queryByText(/Eren Yeager lives in a walled town/)).toBeNull();
   });
 
-  it("does not turn its level into the reader's stored setting", async () => {
-    window.history.replaceState(null, "", "/?level=open");
+  it("does not turn its sensitivity into the reader's stored setting", async () => {
+    window.history.replaceState(null, "", "/?sensitivity=0");
 
     await renderWithAgent();
 
-    expect(window.localStorage.getItem("unspoiled.level")).toBeNull();
+    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBeNull();
   });
 
-  it("sets the level for a reader who has none stored", async () => {
-    window.history.replaceState(null, "", "/?level=balanced&title=Attack%20on%20Titan");
+  it("sets the sensitivity for a reader who has none stored", async () => {
+    window.history.replaceState(null, "", "/?sensitivity=50&title=Attack%20on%20Titan");
 
     const registered = await renderWithAgent();
     await waitFor(() => screen.getByRole("heading", { level: 2, name: "Attack on Titan" }));
 
     const outline = await callTool(registered, "get_article_outline");
-    expect(outline.policy_level).toBe("balanced");
+    expect(outline.sensitivity).toBe(50);
   });
 
   it("cannot choose which host the article is fetched from", async () => {
@@ -436,20 +436,20 @@ describe("a shared link", () => {
   });
 });
 
-describe("the reader's level", () => {
-  it("is stored when the reader picks it", async () => {
+describe("the reader's sensitivity", () => {
+  it("is stored when the reader picks a preset", async () => {
     await renderWithAgent();
 
     await userEvent.click(screen.getByRole("button", { name: /Balanced/ }));
 
-    expect(window.localStorage.getItem("unspoiled.level")).toBe("balanced");
+    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("50");
   });
 
   it("is stored when the agent sets it", async () => {
     const registered = await renderWithAgent();
 
-    await callTool(registered, "set_spoiler_policy", { level: "open" });
+    await callTool(registered, "set_spoiler_policy", { sensitivity: 0 });
 
-    expect(window.localStorage.getItem("unspoiled.level")).toBe("open");
+    expect(window.localStorage.getItem("unspoiled.sensitivity")).toBe("0");
   });
 });

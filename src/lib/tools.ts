@@ -46,6 +46,28 @@ function findSection(article: Article, id: unknown): Section {
   return section;
 }
 
+/**
+ * Sensitivity arrives from an agent, so it is checked here rather than trusted: a value off the
+ * scale would silently reshape what the reader sees.
+ */
+function asSensitivity(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 100) {
+    throw new Error("sensitivity must be a whole number from 0 to 100.");
+  }
+  return raw;
+}
+
+function policyReport(policy: Policy) {
+  return {
+    sensitivity: policy.sensitivity,
+    revealed: [...policy.revealed],
+    withheld: [...policy.withheld],
+    already_knows: policy.alreadyKnows,
+    known_sections: [...policy.knownSections].map(([section_id, because]) => ({ section_id, because })),
+    notes: policy.notes,
+  };
+}
+
 function sectionSummary(section: Section, policy: Policy) {
   let visible = 0;
   let hidden = 0;
@@ -83,7 +105,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           title: article.displayTitle,
           language: article.lang,
           source_url: article.sourceUrl,
-          policy_level: policy.level,
+          sensitivity: policy.sensitivity,
           sections: article.sections.map((section) => sectionSummary(section, policy)),
         };
       },
@@ -118,7 +140,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "describe_withheld_content",
       description:
-        "Describe what is being withheld in a section without revealing it: sentence ids, why each was withheld, and how long it is. When the heading itself is withheld it comes back as null with a heading_id you can pass to reveal. Use this to reason about the article without learning the spoilers.",
+        "Describe what is being withheld in a section without revealing it: sentence ids, why each was withheld, how long it is, and how it scored. The score is what set_spoiler_policy compares against: a sentence scoring 80 comes back on screen at sensitivity 20 or below, so you can tell the reader exactly how far to lower the slider for the part they asked about. Use this to reason about the article without learning the spoilers.",
       inputSchema: {
         type: "object",
         properties: { section_id: { type: "string" } },
@@ -137,7 +159,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
             if (!assessment) continue;
             hidden.push({
               sentence_id: sentence.id,
-              risk: assessment.level,
+              risk: assessment.risk,
               reason: assessment.reason,
               characters: sentence.text.length,
             });
@@ -155,11 +177,16 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "set_spoiler_policy",
       description:
-        "Set how much of this article the reader is willing to see, and tell the page what they already know. 'strict' withholds narrative sections and any wording that hints at the ending, 'balanced' withholds narrative sections and only the sentences that state a reveal outright, 'open' withholds nothing at all — including what you withheld yourself. A sentence the reader revealed, or a section they have marked as already known, stays visible at every level. Fill already_knows from what you know about this particular reader — works they have watched, source novels or manga they have read, seasons they have finished — because a fact they already know is not a spoiler for them. Everything you pass here is displayed on screen for them to correct, so state it plainly rather than guessing.",
+        "Set how much of this article the reader is willing to see, and tell the page what they already know. Sensitivity runs from 0 to 100 and moves one slider on their screen: every sentence is scored for how much of the ending it gives away, and a sentence is withheld when its score is above 100 minus the sensitivity. Three points on it are marked for the reader: 0 withholds nothing at all, including what you withheld yourself; 50 withholds plot summaries and the sentences that state a reveal outright; 75 withholds wording that merely hints at the ending as well. Plot summaries are scored by how far into the section a sentence sits, so lowering the sensitivity opens a plot from its opening scene onward rather than at random. A sentence the reader revealed, or a section they have marked as already known, stays visible at every sensitivity. Fill already_knows from what you know about this particular reader — works they have watched, source novels or manga they have read, seasons they have finished — because a fact they already know is not a spoiler for them. Everything you pass here is displayed on screen for them to correct, so state it plainly rather than guessing.",
       inputSchema: {
         type: "object",
         properties: {
-          level: { type: "string", enum: ["strict", "balanced", "open"] },
+          sensitivity: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100,
+            description: "0 withholds nothing, 50 withholds plot and outright reveals, 75 withholds hints too.",
+          },
           already_knows: {
             type: "array",
             items: { type: "string" },
@@ -168,27 +195,25 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           },
           notes: { type: "string", description: "Anything else about how much this reader wants to know." },
         },
-        required: ["level"],
+        required: ["sensitivity"],
         additionalProperties: false,
       },
       execute: (input) => {
         const policy = context.policy();
         const next: Policy = {
-          level: input.level as Policy["level"],
-          revealed: policy.revealed,
-          withheld: policy.withheld,
+          ...policy,
+          sensitivity: asSensitivity(input.sensitivity),
           alreadyKnows: Array.isArray(input.already_knows)
             ? (input.already_knows as string[])
             : policy.alreadyKnows,
-          knownSections: policy.knownSections,
           notes: typeof input.notes === "string" ? input.notes : policy.notes,
         };
         context.setPolicy(next);
         return {
-          applied: next.level,
+          applied: next.sensitivity,
           already_knows: next.alreadyKnows,
           shown_on_screen: true,
-          hint: "Call get_article_outline next to see what is visible under this policy.",
+          hint: "Call get_article_outline next to see what is visible at this sensitivity.",
         };
       },
     },
@@ -227,7 +252,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           context.markScanned(article, section.id);
           opened.push(section.id);
         }
-        context.setPolicy({ ...policy, revealed: [...new Set([...policy.revealed, ...ids])] });
+        context.setPolicy({ ...policy, revealed: new Set([...policy.revealed, ...ids]) });
         return { revealed, listed_on_screen_as_read: opened };
       },
     },
@@ -242,7 +267,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const sections = article.sections.map((section) => sectionSummary(section, policy));
         return {
           title: article.displayTitle,
-          policy,
+          policy: policyReport(policy),
           sections_the_agent_has_read: context.scanned(),
           total_hidden: sections.reduce((sum, section) => sum + section.hidden_sentences, 0),
           total_visible: sections.reduce((sum, section) => sum + section.visible_sentences, 0),
@@ -270,10 +295,8 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const ids = ((input.section_ids as string[]) ?? []).filter((id) =>
           article.sections.some((section) => section.id === id),
         );
-        const knownSections = [
-          ...policy.knownSections.filter((known) => !ids.includes(known.sectionId)),
-          ...ids.map((sectionId) => ({ sectionId, because })),
-        ];
+        const knownSections = new Map(policy.knownSections);
+        for (const sectionId of ids) knownSections.set(sectionId, because);
         context.setPolicy({ ...policy, knownSections });
         return {
           unhidden_sections: ids.map((id) => ({
@@ -313,10 +336,12 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
             ...section.paragraphs.flatMap((paragraph) => paragraph.sentences.map((s) => s.id)),
           ]);
         const ids = [...((input.sentence_ids as string[]) ?? []), ...fromSections];
+        const revealed = new Set(policy.revealed);
+        for (const id of ids) revealed.delete(id);
         context.setPolicy({
           ...policy,
-          withheld: [...new Set([...policy.withheld, ...ids])],
-          revealed: policy.revealed.filter((id) => !ids.includes(id)),
+          withheld: new Set([...policy.withheld, ...ids]),
+          revealed,
           notes: String(input.because),
         });
         return { withheld: ids.length, because: input.because };
@@ -343,11 +368,9 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
         const count = Math.max(0, Number(input.paragraphs));
         const opened = section.paragraphs.slice(0, count);
         const ids = opened.flatMap((paragraph) => paragraph.sentences.map((sentence) => sentence.id));
-        context.setPolicy({
-          ...policy,
-          revealed: [...new Set([...policy.revealed, ...ids])],
-          withheld: policy.withheld.filter((id) => !ids.includes(id)),
-        });
+        const withheld = new Set(policy.withheld);
+        for (const id of ids) withheld.delete(id);
+        context.setPolicy({ ...policy, revealed: new Set([...policy.revealed, ...ids]), withheld });
         return {
           section_id: section.id,
           paragraphs_opened: opened.length,
@@ -445,7 +468,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           title: result.article.displayTitle,
           language: result.article.lang,
           source_url: result.article.sourceUrl,
-          policy_level: result.policy.level,
+          sensitivity: result.policy.sensitivity,
           sections: result.article.sections.map((section) => sectionSummary(section, result.policy)),
         };
       },

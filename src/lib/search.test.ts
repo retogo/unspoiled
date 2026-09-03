@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { findEvidence } from "./search";
-import { defaultPolicy, type Policy } from "./risk";
+import { newPolicy, type Policy } from "./risk";
 import type { Article, Section } from "./segment";
 
 function section(id: string, heading: string, sentences: string[]): Section {
@@ -29,7 +29,7 @@ function article(...sections: Section[]): Article {
 }
 
 function policy(overrides: Partial<Policy> = {}): Policy {
-  return { ...defaultPolicy, ...overrides };
+  return { ...newPolicy(), ...overrides };
 }
 
 describe("findEvidence", () => {
@@ -64,7 +64,7 @@ describe("findEvidence", () => {
 
   it("names a withheld heading once the reader has revealed it", () => {
     const finale = section("s1", "Series finale", ["The show ran for six seasons on television."]);
-    const found = findEvidence(article(finale), policy({ revealed: ["s1.heading"] }), "how many seasons", 8);
+    const found = findEvidence(article(finale), policy({ revealed: new Set(["s1.heading"]) }), "how many seasons", 8);
 
     expect(found.evidence[0].section).toBe("Series finale");
   });
@@ -91,7 +91,7 @@ describe("findEvidence", () => {
   it("matches a Japanese term that starts at an odd offset in the sentence", () => {
     const found = findEvidence(
       article(section("s1", "あらすじ", ["犯人の正体が明かされる。"])),
-      policy({ level: "open" }),
+      newPolicy(0),
       "正体は誰？",
       8,
     );

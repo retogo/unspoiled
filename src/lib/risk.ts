@@ -3,10 +3,23 @@ import { isLead } from "./segment";
 
 export type RiskLevel = "safe" | "suspect" | "spoiler";
 
+/**
+ * `risk` is how much of the ending this text gives away, from 0 to 100. It is compared against the
+ * reader's threshold; `level` and `reason` say the same thing in words, for the screen and for the
+ * agent.
+ */
 export type Assessment = {
   level: RiskLevel;
+  risk: number;
   reason: string;
 };
+
+const CERTAIN = 100;
+const NARRATIVE_OPENING = 60;
+const ANALYSIS = 70;
+const OUTRIGHT_REVEAL = 85;
+const HINT = 40;
+const NOTHING = 0;
 
 const HEADING_TAIL = String.raw`(?:\s*[([:：（〔・\-–—/].*)?$`;
 
@@ -32,26 +45,34 @@ const STRONG_REVEAL_MARKERS =
 const WEAK_REVEAL_MARKERS =
   /\breveal|\bbetray|\bresurrect|\bin the end\b|\bfinale\b|\bdeath of\b|\bfate of\b|\bending\b|\bclimax\b|\bepilogue\b|結末|最終回|最終話|死ぬ|死亡/i;
 
+function isNarrative(section: Section): boolean {
+  return section.headingPath.some((heading) => NARRATIVE_SECTIONS.test(heading));
+}
+
+function isAnalysis(section: Section): boolean {
+  return section.headingPath.some((heading) => ANALYSIS_SECTIONS.test(heading));
+}
+
 export function assessSection(section: Section): Assessment {
-  if (section.headingPath.some((heading) => NARRATIVE_SECTIONS.test(heading))) {
-    return { level: "spoiler", reason: "plot summaries state the ending" };
+  if (isNarrative(section)) {
+    return { level: "spoiler", risk: CERTAIN, reason: "plot summaries state the ending" };
   }
-  if (section.headingPath.some((heading) => ANALYSIS_SECTIONS.test(heading))) {
-    return { level: "spoiler", reason: "analysis sections discuss the ending" };
+  if (isAnalysis(section)) {
+    return { level: "spoiler", risk: ANALYSIS, reason: "analysis sections discuss the ending" };
   }
   if (isLead(section)) {
-    return { level: "safe", reason: "lead section, checked sentence by sentence" };
+    return { level: "safe", risk: NOTHING, reason: "lead section, checked sentence by sentence" };
   }
   if (META_SECTIONS.test(section.heading)) {
-    return { level: "safe", reason: "a production or publication section" };
+    return { level: "safe", risk: NOTHING, reason: "a production or publication section" };
   }
-  return { level: "safe", reason: "checked sentence by sentence" };
+  return { level: "safe", risk: NOTHING, reason: "checked sentence by sentence" };
 }
 
 export function assessHeading(section: Section): Assessment | null {
   if (isLead(section)) return null;
   if (STRONG_REVEAL_MARKERS.test(section.heading) || WEAK_REVEAL_MARKERS.test(section.heading)) {
-    return { level: "spoiler", reason: "the heading itself names the reveal" };
+    return { level: "spoiler", risk: OUTRIGHT_REVEAL, reason: "the heading itself names the reveal" };
   }
   return null;
 }
@@ -60,63 +81,122 @@ export function headingId(section: Section): string {
   return `${section.id}.heading`;
 }
 
-export function assessSentence(sentence: Sentence, section: Section): Assessment {
-  const sectionAssessment = assessSection(section);
-  if (sectionAssessment.level === "spoiler") {
-    return sectionAssessment;
+function higher(base: Assessment, marker: Assessment): Assessment {
+  return marker.risk > base.risk ? marker : base;
+}
+
+/**
+ * A plot summary runs in the order the story does, so a sentence is scored by how far into the
+ * section it sits: the opening is the safest thing in it and the last sentence is the ending. That
+ * is what lets the reader lower their threshold and have the story open from the front.
+ */
+function baseline(section: Section, position: number, count: number): Assessment {
+  if (isNarrative(section)) {
+    const through = count > 1 ? position / (count - 1) : 1;
+    return {
+      level: "spoiler",
+      risk: Math.round(NARRATIVE_OPENING + (CERTAIN - NARRATIVE_OPENING) * through),
+      reason: "plot summaries state the ending",
+    };
   }
-  if (STRONG_REVEAL_MARKERS.test(sentence.text)) {
-    return { level: "spoiler", reason: "a sentence that states the reveal outright" };
+  if (isAnalysis(section)) {
+    return { level: "spoiler", risk: ANALYSIS, reason: "analysis sections discuss the ending" };
   }
-  if (WEAK_REVEAL_MARKERS.test(sentence.text)) {
-    return { level: "suspect", reason: "wording that hints at the ending" };
-  }
-  return { level: "safe", reason: sectionAssessment.reason };
+  return { level: "safe", risk: NOTHING, reason: assessSection(section).reason };
+}
+
+function assessAll(section: Section): Map<string, Assessment> {
+  const sentences = section.paragraphs.flatMap((paragraph) => paragraph.sentences);
+  return new Map(
+    sentences.map((sentence, position) => {
+      const base = baseline(section, position, sentences.length);
+      if (STRONG_REVEAL_MARKERS.test(sentence.text)) {
+        return [
+          sentence.id,
+          higher(base, {
+            level: "spoiler",
+            risk: OUTRIGHT_REVEAL,
+            reason: "a sentence that states the reveal outright",
+          }),
+        ];
+      }
+      if (WEAK_REVEAL_MARKERS.test(sentence.text)) {
+        return [
+          sentence.id,
+          higher(base, { level: "suspect", risk: HINT, reason: "wording that hints at the ending" }),
+        ];
+      }
+      return [sentence.id, base];
+    }),
+  );
+}
+
+/**
+ * Scoring a section is the only work that touches every sentence, and nothing about it depends on
+ * the reader, so it is done once per section and reused. Moving the slider then costs one lookup
+ * and one comparison per sentence.
+ */
+const scored = new WeakMap<Section, Map<string, Assessment>>();
+
+export function assessSentences(section: Section): ReadonlyMap<string, Assessment> {
+  const cached = scored.get(section);
+  if (cached) return cached;
+  const assessments = assessAll(section);
+  scored.set(section, assessments);
+  return assessments;
 }
 
 export type Policy = {
-  level: "strict" | "balanced" | "open";
-  revealed: string[];
-  withheld: string[];
+  /** 0 withholds nothing; 100 withholds anything carrying the least suspicion. */
+  sensitivity: number;
+  revealed: Set<string>;
+  withheld: Set<string>;
   alreadyKnows: string[];
-  knownSections: { sectionId: string; because: string }[];
+  knownSections: Map<string, string>;
   notes: string;
 };
 
-export const defaultPolicy: Policy = {
-  level: "strict",
-  revealed: [],
-  withheld: [],
-  alreadyKnows: [],
-  knownSections: [],
-  notes: "",
-};
+export const DEFAULT_SENSITIVITY = 75;
+
+export function newPolicy(sensitivity: number = DEFAULT_SENSITIVITY): Policy {
+  return {
+    sensitivity,
+    revealed: new Set(),
+    withheld: new Set(),
+    alreadyKnows: [],
+    knownSections: new Map(),
+    notes: "",
+  };
+}
 
 const WITHHELD_BY_AGENT: Assessment = {
   level: "spoiler",
+  risk: CERTAIN,
   reason: "withheld at your agent's request",
 };
 
-function hiddenByLevel(assessment: Assessment, level: Policy["level"]): boolean {
-  if (level === "balanced") return assessment.level === "spoiler";
-  return assessment.level !== "safe";
-}
-
 export function isSectionKnown(policy: Policy, sectionId: string): string | null {
-  return policy.knownSections.find((known) => known.sectionId === sectionId)?.because ?? null;
+  return policy.knownSections.get(sectionId) ?? null;
 }
 
 function shownRegardless(policy: Policy, id: string, sectionId: string): boolean {
-  if (policy.level === "open") return true;
-  if (policy.revealed.includes(id)) return true;
+  if (policy.revealed.has(id)) return true;
   return isSectionKnown(policy, sectionId) !== null;
+}
+
+/**
+ * What the agent withheld scores a certainty, so it stays hidden at every sensitivity the reader
+ * can pick except zero — where the threshold sits above everything and nothing is withheld at all.
+ */
+function withheldAt(assessment: Assessment | null, policy: Policy): Assessment | null {
+  if (!assessment) return null;
+  return assessment.risk > CERTAIN - policy.sensitivity ? assessment : null;
 }
 
 export function hiddenSentenceReason(sentence: Sentence, section: Section, policy: Policy): Assessment | null {
   if (shownRegardless(policy, sentence.id, section.id)) return null;
-  if (policy.withheld.includes(sentence.id)) return WITHHELD_BY_AGENT;
-  const assessment = assessSentence(sentence, section);
-  return hiddenByLevel(assessment, policy.level) ? assessment : null;
+  if (policy.withheld.has(sentence.id)) return withheldAt(WITHHELD_BY_AGENT, policy);
+  return withheldAt(assessSentences(section).get(sentence.id) ?? null, policy);
 }
 
 export function hiddenSentence(sentence: Sentence, section: Section, policy: Policy): boolean {
@@ -126,8 +206,8 @@ export function hiddenSentence(sentence: Sentence, section: Section, policy: Pol
 export function hiddenHeading(section: Section, policy: Policy): Assessment | null {
   const id = headingId(section);
   if (shownRegardless(policy, id, section.id)) return null;
-  if (policy.withheld.includes(id)) return WITHHELD_BY_AGENT;
-  return assessHeading(section);
+  if (policy.withheld.has(id)) return withheldAt(WITHHELD_BY_AGENT, policy);
+  return withheldAt(assessHeading(section), policy);
 }
 
 export function countHidden(article: Article, policy: Policy): { hidden: number; total: number } {
@@ -142,4 +222,14 @@ export function countHidden(article: Article, policy: Policy): { hidden: number;
     }
   }
   return { hidden, total };
+}
+
+export function countHiddenIn(section: Section, policy: Policy): number {
+  let hidden = 0;
+  for (const paragraph of section.paragraphs) {
+    for (const sentence of paragraph.sentences) {
+      if (hiddenSentence(sentence, section, policy)) hidden += 1;
+    }
+  }
+  return hidden;
 }

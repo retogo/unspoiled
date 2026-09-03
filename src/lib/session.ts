@@ -1,8 +1,7 @@
-import { defaultPolicy, type Policy } from "./risk";
+import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
 import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 
-const LEVELS: Policy["level"][] = ["strict", "balanced", "open"];
 const LANGS: Lang[] = ["en", "ja"];
 
 export type SharedArticle = { lang: Lang; title: string };
@@ -18,8 +17,10 @@ export type ScannedSection = {
   sectionId: string;
 };
 
-function asLevel(raw: string | null): Policy["level"] | null {
-  return LEVELS.find((level) => level === raw) ?? null;
+function asSensitivity(raw: string | null): number | null {
+  if (raw === null || !/^\d{1,3}$/.test(raw)) return null;
+  const sensitivity = Number(raw);
+  return sensitivity <= 100 ? sensitivity : null;
 }
 
 function asLang(raw: string | null): Lang | null {
@@ -28,15 +29,17 @@ function asLang(raw: string | null): Lang | null {
 
 /**
  * A shared link may carry any string, so it is treated as untrusted input: the
- * reader's stored level wins over the one in the link, and a level that arrives
- * from either source is only used when it names a real policy.
+ * reader's stored sensitivity wins over the one in the link, and a sensitivity
+ * that arrives from either source is only used when it is a whole number on the
+ * scale.
  */
-export function readSessionStart(search: string, storedLevel: string | null): SessionStart {
+export function readSessionStart(search: string, storedSensitivity: string | null): SessionStart {
   const params = new URLSearchParams(search);
-  const level = asLevel(storedLevel) ?? asLevel(params.get("level")) ?? defaultPolicy.level;
+  const sensitivity =
+    asSensitivity(storedSensitivity) ?? asSensitivity(params.get("sensitivity")) ?? DEFAULT_SENSITIVITY;
   const title = params.get("title");
   return {
-    policy: { ...defaultPolicy, level },
+    policy: newPolicy(sensitivity),
     article: title ? { lang: asLang(params.get("lang")) ?? "en", title } : null,
   };
 }
@@ -57,7 +60,7 @@ function isSameArticle(open: Article | null, opened: Article): boolean {
  */
 export function policyForOpened(policy: Policy, open: Article | null, opened: Article): Policy {
   if (isSameArticle(open, opened)) return policy;
-  return { ...defaultPolicy, level: policy.level };
+  return newPolicy(policy.sensitivity);
 }
 
 export function scannedForArticle(scanned: ScannedSection[], article: Article | null): string[] {
