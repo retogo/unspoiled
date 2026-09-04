@@ -843,25 +843,53 @@ export default function App() {
 }
 
 /**
- * The theme, as one button that turns through the three. An icon says where it is now, and its name
- * says that and where the next press goes, because a reader who cannot see the icon would otherwise
- * be pressing a button that never says what it does.
+ * The theme, as the three it can be rather than a button that turns through them: the reader can
+ * see which one they are on and reach the one they want in a single press. The icons are the whole
+ * of it, so each one's name is the only thing that says which is which.
+ *
+ * Arrow keys move through it the way they move through any radio group, and picking is what moving
+ * does — there is nothing to confirm afterwards, and the page repaints as the reader passes.
  */
 function ThemeToggle({ theme, onChoose }: { theme: ThemeChoice; onChoose: (choice: ThemeChoice) => void }) {
+  const marks = useRef<(HTMLButtonElement | null)[]>([]);
   const at = THEMES.findIndex((option) => option.choice === theme);
-  const current = THEMES[at];
-  const next = THEMES[(at + 1) % THEMES.length];
-  const name = `Theme: ${current.label}. Switch to ${next.label}`;
+
+  const step = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const by = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+    if (by === 0) return;
+    event.preventDefault();
+    const next = (at + by + THEMES.length) % THEMES.length;
+    onChoose(THEMES[next].choice);
+    marks.current[next]?.focus();
+  };
 
   return (
-    <button
-      onClick={() => onChoose(next.choice)}
-      aria-label={name}
-      title={name}
-      className="rounded-full p-1.5 text-muted hover:bg-raised hover:text-ink"
+    <div
+      role="radiogroup"
+      aria-label="Page theme"
+      onKeyDown={step}
+      className="flex gap-0.5 rounded-full bg-raised p-0.5"
     >
-      <current.Mark />
-    </button>
+      {THEMES.map((option, index) => (
+        <button
+          key={option.choice}
+          ref={(mark) => {
+            marks.current[index] = mark;
+          }}
+          role="radio"
+          aria-checked={option.choice === theme}
+          aria-label={option.label}
+          title={option.label}
+          tabIndex={option.choice === theme ? 0 : -1}
+          onClick={() => onChoose(option.choice)}
+          className={`rounded-full p-1.5 ${
+            option.choice === theme ? "bg-ink text-inverse" : "text-muted hover:text-ink"
+          }`}
+        >
+          <option.Mark />
+        </button>
+      ))}
+    </div>
   );
 }
 

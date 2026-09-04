@@ -8,13 +8,12 @@ function painted(): string | undefined {
   return document.documentElement.dataset.theme;
 }
 
-/** The one theme control, named for where it is and where the next press will take it. */
-function toggle(): HTMLElement {
-  return screen.getByRole("button", { name: /^Theme: / });
+function choice(label: string): HTMLElement {
+  return screen.getByRole("radio", { name: label });
 }
 
 function switchTo(label: string): Promise<void> {
-  return userEvent.click(screen.getByRole("button", { name: new RegExp(`Switch to ${label}$`) }));
+  return userEvent.click(choice(label));
 }
 
 beforeEach(() => {
@@ -50,30 +49,30 @@ describe("the page theme", () => {
     expect(painted()).toBe("dark");
   });
 
-  it("paints and remembers the theme the reader turns it to", async () => {
+  it("paints and remembers the theme the reader picks", async () => {
     render(<App />);
 
-    await switchTo("Light");
     await switchTo("Dark");
 
     expect(painted()).toBe("dark");
     expect(window.localStorage.getItem("unspoiled.theme")).toBe("dark");
   });
 
-  it("turns light, then dark, then back to the system", async () => {
+  it("goes straight to any of the three, in any order", async () => {
     render(<App />);
 
-    await switchTo("Light");
-    expect(window.localStorage.getItem("unspoiled.theme")).toBe("light");
-
-    await switchTo("Dark");
-    expect(window.localStorage.getItem("unspoiled.theme")).toBe("dark");
-
-    await switchTo("System");
-    expect(window.localStorage.getItem("unspoiled.theme")).toBe("system");
+    for (const [label, stored] of [
+      ["Dark", "dark"],
+      ["Light", "light"],
+      ["System", "system"],
+      ["Dark", "dark"],
+    ]) {
+      await switchTo(label);
+      expect(window.localStorage.getItem("unspoiled.theme")).toBe(stored);
+    }
   });
 
-  it("keeps a reader who turned it to light on light under a dark system", async () => {
+  it("keeps a reader who picked light on light under a dark system", async () => {
     systemPrefersDark(true);
     render(<App />);
 
@@ -90,7 +89,7 @@ describe("the page theme", () => {
     expect(painted()).toBe("dark");
   });
 
-  it("stops following the system once the reader has turned it somewhere", async () => {
+  it("stops following the system once the reader has picked a theme", async () => {
     render(<App />);
     await switchTo("Light");
 
@@ -102,7 +101,6 @@ describe("the page theme", () => {
   it("follows the system again when the reader hands it back", async () => {
     render(<App />);
     await switchTo("Light");
-    await switchTo("Dark");
 
     await switchTo("System");
     systemSwitchesTo("dark");
@@ -110,20 +108,51 @@ describe("the page theme", () => {
     expect(painted()).toBe("dark");
   });
 
-  /* The icon says where the theme is; the name has to say that and where the next press goes. */
-  it("says where it is and where the next press takes it", async () => {
+  /* Icons alone, so the name of each one is the only thing that says which is which. */
+  it("says which of the three is in use for a reader who cannot see them", async () => {
     render(<App />);
-    expect(toggle().getAttribute("aria-label")).toBe("Theme: System. Switch to Light");
-    expect(toggle().getAttribute("title")).toBe("Theme: System. Switch to Light");
+    expect(screen.getByRole("radiogroup", { name: "Page theme" })).toBeTruthy();
+    expect(choice("System").getAttribute("aria-checked")).toBe("true");
 
-    await switchTo("Light");
+    await switchTo("Dark");
 
-    expect(toggle().getAttribute("aria-label")).toBe("Theme: Light. Switch to Dark");
+    expect(choice("Dark").getAttribute("aria-checked")).toBe("true");
+    expect(choice("System").getAttribute("aria-checked")).toBe("false");
+    expect(choice("Light").getAttribute("aria-checked")).toBe("false");
   });
 
-  it("is one control rather than three", () => {
+  it("offers all three at once", () => {
     render(<App />);
 
-    expect(screen.getAllByRole("button", { name: /^Theme: / })).toHaveLength(1);
+    expect(screen.getAllByRole("radio").map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Light",
+      "Dark",
+      "System",
+    ]);
+  });
+
+  /* Arrow keys move through a radio group, and moving through this one picks as it goes. */
+  it("moves through the three with the arrow keys", async () => {
+    render(<App />);
+    choice("System").focus();
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(painted()).toBe("light");
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(painted()).toBe("dark");
+
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(painted()).toBe("light");
+  });
+
+  it("carries the focus to the one the arrow keys moved to", async () => {
+    render(<App />);
+    await switchTo("Light");
+
+    await userEvent.keyboard("{ArrowRight}");
+
+    expect(document.activeElement).toBe(choice("Dark"));
+    expect(choice("Dark").getAttribute("aria-checked")).toBe("true");
   });
 });
