@@ -89,13 +89,12 @@ giveaway words in it at all, which the wording rules were never going to catch.
 
 Under the slider is the reader's other control: phrases the page withholds wherever they appear, at
 every sensitivity, including the one that withholds nothing else. A rule is a phrase rather than a
-sentence id, so it survives the article changing — `This article only` keeps it to the article it
-was made on, `Every article` carries it wherever the reader goes next.
+sentence id, so there is nothing to tie it to one page — it applies to every article the reader
+opens, and is kept on their device until they take it down.
 
 An agent adds one with `add_rules`, and this is the one thing it hands the page that the page then
-shows the reader in the agent's own words. So the reader sees the rule's label, its scope, its
-reason and how many sentences of the article in front of them it reached — all of it, without
-opening anything. The phrases are the exception: the phrase an agent picks to catch a spoiler is
+shows the reader in the agent's own words. So the reader sees the rule's label, its reason and how
+many sentences of the article in front of them it reached — all of it, without opening anything. The phrases are the exception: the phrase an agent picks to catch a spoiler is
 very often the spoiler, so they stand behind the same mask a withheld sentence does, under
 `Show phrases`. A label that repeats one of its own phrases fails the call, because it would print
 the spoiler above the mask.
@@ -107,7 +106,7 @@ the spoiler above the mask.
 | `open_article` | Open a Wikipedia article by title, in English or Japanese, or describe the one already open: sections, headings, sentence counts and how many are withheld right now. No article text |
 | `read_article_content` | Read the article in full, spoilers included, every sentence under an id and flagged with whether the reader can currently see it |
 | `apply_mask` | Show and hide sections, paragraphs or sentences, with the reason. Beats the slider in both directions; hiding beats showing. Every call is displayed on the reader's screen, and reports what it matched and which ids named nothing |
-| `add_rules` | Add standing rules that withhold every sentence carrying one of their phrases, on this article or on all of them. The reader sees the label, scope, reason and match count; the phrases stay behind `Show phrases`, and a label that repeats one of them fails the call |
+| `add_rules` | Add standing rules that withhold every sentence carrying one of their phrases, in every article and in later sessions. The reader sees the label, reason and match count; the phrases stay behind `Show phrases`, and a label that repeats one of them fails the call |
 | `get_masking_report` | Audit: sensitivity, how many sentences are shown and hidden, every standing rule by its label and how far it reaches, every decision and its reason, and which sections the agent has read. No article text and no rule phrases |
 
 ## Running it

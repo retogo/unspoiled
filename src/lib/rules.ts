@@ -1,11 +1,10 @@
-/** Whether a rule follows the reader from article to article, or belongs to the one it was made on. */
-export type RuleScope = "article" | "all";
-
-/** What every rule holds, whoever made it: the phrases to look for and what it is called. */
+/**
+ * What every rule holds, whoever made it: the phrases to look for and what it is called. A rule is
+ * phrases rather than ids, so it holds wherever the reader goes — there is nothing to scope it to.
+ */
 type RuleBody = {
   phrases: string[];
   label: string;
-  scope: RuleScope;
 };
 
 /** The page's own name for a rule, and when it was made. Neither party writes these. */

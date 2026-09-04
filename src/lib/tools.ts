@@ -1,6 +1,6 @@
 import { sectionHeading, sectionHeadingPath, type Article, type Paragraph, type Section } from "./segment";
 import { assessSection, hiddenSentence, maskWith, type Decision, type Policy } from "./risk";
-import { countMatching, fold, type Rule, type RuleDraft, type RuleScope } from "./rules";
+import { countMatching, fold, type Rule, type RuleDraft } from "./rules";
 import { articleKey } from "./session";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
@@ -147,7 +147,7 @@ function sentenceTexts(article: Article): string[] {
  * nothing to judge, and a label that repeats a phrase prints the spoiler under the mask.
  */
 function asDraft(request: unknown): RuleDraft {
-  const { phrases, label, scope, reason } = (request ?? {}) as Record<string, unknown>;
+  const { phrases, label, reason } = (request ?? {}) as Record<string, unknown>;
   const wanted = (Array.isArray(phrases) ? phrases : [])
     .filter((phrase): phrase is string => typeof phrase === "string")
     .map((phrase) => phrase.trim())
@@ -165,13 +165,7 @@ function asDraft(request: unknown): RuleDraft {
       "The label repeats one of the phrases, which would print the spoiler on the reader's screen. Describe what the rule covers instead, as in \"The fate of a main character\".",
     );
   }
-  return {
-    phrases: wanted,
-    label: named,
-    scope: (scope === "all" ? "all" : "article") as RuleScope,
-    origin: "agent",
-    reason: why,
-  };
+  return { phrases: wanted, label: named, origin: "agent", reason: why };
 }
 
 /**
@@ -195,13 +189,7 @@ function decisionsOn(policy: Policy, key: string): ReportedDecision[] {
     .map((decision) =>
       decision.kind === "mask"
         ? { kind: decision.kind, at: decision.at, show: decision.show, hide: decision.hide, reason: decision.reason }
-        : {
-            kind: decision.kind,
-            at: decision.at,
-            label: decision.label,
-            scope: decision.scope,
-            reason: decision.reason,
-          },
+        : { kind: decision.kind, at: decision.at, label: decision.label, reason: decision.reason },
     );
 }
 
@@ -347,7 +335,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "add_rules",
       description:
-        "Add a standing rule: every sentence carrying one of `phrases` comes off the reader's screen, wherever in the article it appears and at every sensitivity, including the one that withholds nothing else. This is for what you know and the page cannot see — a character whose fate this reader does not want, a name they have asked you never to mention, anything past where they have watched or read. Matching is literal and case-insensitive, so give the phrase in the form the article uses it and add the variants beside it. `label` is what the reader is shown in place of the phrases and MUST be safe for them to read: a description of the ground the rule covers, never the phrases reworded and never the name or the event. \"The fate of a main character\" and \"Developments after volume 30\" are labels; \"Levi dies\" is not, and a label that repeats one of its own phrases fails the call. `reason` is why you added it and is shown beside the label. `scope` is this article unless you say \"all\", which is for something the reader never wants to meet anywhere. They see the label, the scope, how many sentences it reached and your reason, and can uncover the phrases or take the rule down; nothing here removes one, so ask them if they should. Call get_masking_report afterwards for what the page is now withholding.",
+        "Add a standing rule: every sentence carrying one of `phrases` comes off the reader's screen, wherever it appears, in every article they open, at every sensitivity including the one that withholds nothing else, and in later sessions — a rule is kept on their device until they take it down. So add one for something they never want to meet again rather than for one page: a character whose fate they do not want, a name they have asked you never to mention, anything past where they have watched or read. Matching is literal and case-insensitive, so give the phrase in the form the article uses it and add the variants beside it. `label` is what the reader is shown in place of the phrases and MUST be safe for them to read: a description of the ground the rule covers, never the phrases reworded and never the name or the event. \"The fate of a main character\" and \"Developments after volume 30\" are labels; \"Levi dies\" is not, and a label that repeats one of its own phrases fails the call. `reason` is why you added it and is shown beside the label. They see the label, how many sentences of the article in front of them it reached and your reason, and can uncover the phrases or take the rule down; nothing here removes one, so ask them if they should. Call get_masking_report afterwards for what the page is now withholding.",
       inputSchema: {
         type: "object",
         properties: {
@@ -366,7 +354,6 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
                   description:
                     "What the reader is shown instead of the phrases. Say what the rule covers, not what it hides.",
                 },
-                scope: { type: "string", enum: ["article", "all"] },
                 reason: { type: "string", description: "Why this reader wants this hidden. Shown on their screen." },
               },
               required: ["phrases", "label", "reason"],
@@ -396,7 +383,6 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           added: added.map((rule) => ({
             id: rule.id,
             label: rule.label,
-            scope: rule.scope,
             matched_sentences: countMatching(rule, texts),
           })),
           sentences: countSentences(article, policy),
@@ -406,7 +392,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
     {
       name: "get_masking_report",
       description:
-        "Audit what the reader is looking at: how many sentences are on their screen and how many are withheld, every standing rule by its label and how many sentences it reaches, everything apply_mask and add_rules have done and the reason you gave for each, and which sections read_article_content has read. No article text and no rule phrases, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
+        "Audit what the reader is looking at: how many sentences are on their screen and how many are withheld, every standing rule by its label and how many sentences of this article it reaches, everything apply_mask and add_rules have done and the reason you gave for each, and which sections read_article_content has read. No article text and no rule phrases, so this is safe to summarise back to the reader — it is how you tell them what you withheld without telling them what was in it.",
       inputSchema: noInput,
       execute: () => {
         const article = requireArticle(context);
@@ -419,7 +405,6 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
           rules: policy.rules.map((rule) => ({
             id: rule.id,
             label: rule.label,
-            scope: rule.scope,
             origin: rule.origin,
             matched_sentences: countMatching(rule, texts),
           })),

@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Rule, RuleScope } from "./rules";
+import type { Rule } from "./rules";
 import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 import {
-  allRules,
   articleKey,
   historyActionFor,
   policyForOpened,
@@ -12,7 +11,6 @@ import {
   readRuleStore,
   readSessionStart,
   recordScanned,
-  rulesFor,
   scannedElsewhere,
   scannedForArticle,
   storedWith,
@@ -49,8 +47,8 @@ const usedPolicy: Policy = {
   ],
 };
 
-function rule(id: string, phrase: string, scope: RuleScope = "article"): Rule {
-  return { id, phrases: [phrase], label: phrase, scope, origin: "reader", at: 0 };
+function rule(id: string, phrase: string): Rule {
+  return { id, phrases: [phrase], label: phrase, origin: "reader", at: 0 };
 }
 
 describe("readSessionStart", () => {
@@ -135,90 +133,64 @@ describe("policyForOpened", () => {
     expect(policyForOpened(usedPolicy, null, article("en", "The Sixth Sense"), []).hidden.size).toBe(0);
   });
 
-  it("carries the rules that apply to the article being opened", () => {
-    const rules = [rule("r1", "Levi", "all")];
+  it("carries the reader's rules into the article being opened", () => {
+    const rules = [rule("r1", "Levi")];
     const next = policyForOpened(usedPolicy, article("en", "Attack on Titan"), article("en", "The Sixth Sense"), rules);
     expect(next.rules).toEqual(rules);
   });
 });
 
 describe("the rules the reader has stored", () => {
-  const titan = articleKey("en", "Attack on Titan");
-  const stored: RuleStore = {
-    all: [rule("r1", "Levi", "all")],
-    byArticle: { [titan]: [rule("r2", "Eren")] },
-  };
+  const stored: RuleStore = [rule("r1", "Levi"), rule("r2", "Eren")];
 
   it("keeps a rule through a round trip", () => {
     expect(readRuleStore(JSON.stringify(stored))).toEqual(stored);
   });
 
-  it.each(["", "not json", "null", "[]", '"a phrase"', '{"all":3}', '{"byArticle":[]}'])(
-    "ignores %s, which is not a set of rules",
+  it.each(["", "not json", "null", '"a phrase"', "{}", '{"all":3}'])(
+    "ignores %s, which is not a list of rules",
     (raw) => {
-      expect(readRuleStore(raw)).toEqual({ all: [], byArticle: {} });
+      expect(readRuleStore(raw)).toEqual([]);
     },
   );
 
   it("reads nothing for a reader who has stored nothing", () => {
-    expect(readRuleStore(null)).toEqual({ all: [], byArticle: {} });
+    expect(readRuleStore(null)).toEqual([]);
   });
 
   it.each([
-    { phrases: ["Levi"], label: "Levi", scope: "all", origin: "reader", at: 0 },
-    { id: "r1", label: "Levi", scope: "all", origin: "reader", at: 0 },
-    { id: "r1", phrases: [], label: "Levi", scope: "all", origin: "reader", at: 0 },
-    { id: "r1", phrases: ["Levi"], label: "  ", scope: "all", origin: "reader", at: 0 },
-    { id: "r1", phrases: ["Levi"], label: "Levi", scope: "everywhere", origin: "reader", at: 0 },
-    { id: "r1", phrases: ["Levi"], label: "Levi", scope: "all", origin: "someone else", at: 0 },
-    { id: "r1", phrases: [7], label: "Levi", scope: "all", origin: "reader", at: 0 },
+    { phrases: ["Levi"], label: "Levi", origin: "reader", at: 0 },
+    { id: "r1", label: "Levi", origin: "reader", at: 0 },
+    { id: "r1", phrases: [], label: "Levi", origin: "reader", at: 0 },
+    { id: "r1", phrases: ["Levi"], label: "  ", origin: "reader", at: 0 },
+    { id: "r1", phrases: ["Levi"], label: "Levi", origin: "someone else", at: 0 },
+    { id: "r1", phrases: [7], label: "Levi", origin: "reader", at: 0 },
   ])("drops a stored entry that is not a rule", (entry) => {
-    expect(readRuleStore(JSON.stringify({ all: [entry], byArticle: {} })).all).toEqual([]);
+    expect(readRuleStore(JSON.stringify([entry]))).toEqual([]);
+  });
+
+  /* An older build filed rules by article. That shape is not a list, so it reads as no rules. */
+  it("ignores the shape an earlier version of the page stored", () => {
+    const older = { all: [rule("r1", "Levi")], byArticle: { "en:Attack on Titan": [rule("r2", "Eren")] } };
+    expect(readRuleStore(JSON.stringify(older))).toEqual([]);
   });
 
   it("keeps the rules that are rules alongside one that is not", () => {
-    const raw = JSON.stringify({ all: [rule("r1", "Levi", "all"), { id: "r2" }], byArticle: {} });
-    expect(readRuleStore(raw).all).toEqual([rule("r1", "Levi", "all")]);
+    expect(readRuleStore(JSON.stringify([rule("r1", "Levi"), { id: "r2" }]))).toEqual([rule("r1", "Levi")]);
   });
 
-  it("applies an every-article rule whatever is open", () => {
-    expect(rulesFor(stored, { lang: "en", title: "The Sixth Sense" })).toEqual([rule("r1", "Levi", "all")]);
-  });
-
-  it("applies a rule made on one article only while that article is open", () => {
-    expect(rulesFor(stored, { lang: "en", title: "Attack on Titan" })).toEqual([
-      rule("r1", "Levi", "all"),
-      rule("r2", "Eren"),
-    ]);
-  });
-
-  it("applies the every-article rules on the search screen", () => {
-    expect(rulesFor(stored, null)).toEqual([rule("r1", "Levi", "all")]);
-  });
-
-  it("counts every stored rule, wherever it applies", () => {
-    expect(allRules(stored).map((entry) => entry.id)).toEqual(["r1", "r2"]);
-  });
-
-  it("puts a new rule where its scope says it belongs", () => {
-    const next = storedWith(stored, titan, [rule("r3", "Mikasa"), rule("r4", "Hange", "all")]);
-    expect(next.byArticle[titan].map((entry) => entry.id)).toEqual(["r2", "r3"]);
-    expect(next.all.map((entry) => entry.id)).toEqual(["r1", "r4"]);
-  });
-
-  it("starts an article's list with the first rule made on it", () => {
-    const key = articleKey("en", "The Sixth Sense");
-    expect(storedWith(stored, key, [rule("r3", "Cole")]).byArticle[key]).toEqual([rule("r3", "Cole")]);
+  it("adds a new rule after the ones already stored", () => {
+    expect(storedWith(stored, [rule("r3", "Mikasa")]).map((entry) => entry.id)).toEqual(["r1", "r2", "r3"]);
   });
 
   it("leaves the store it was given alone", () => {
-    storedWith(stored, titan, [rule("r3", "Mikasa")]);
-    expect(allRules(stored).map((entry) => entry.id)).toEqual(["r1", "r2"]);
+    storedWith(stored, [rule("r3", "Mikasa")]);
+    expect(stored.map((entry) => entry.id)).toEqual(["r1", "r2"]);
   });
 
-  it("takes a rule out of whichever list holds it", () => {
-    expect(allRules(storedWithout(stored, "r1")).map((entry) => entry.id)).toEqual(["r2"]);
-    expect(allRules(storedWithout(stored, "r2")).map((entry) => entry.id)).toEqual(["r1"]);
+  it("takes a rule out by its name", () => {
+    expect(storedWithout(stored, "r1").map((entry) => entry.id)).toEqual(["r2"]);
+    expect(storedWithout(stored, "r2").map((entry) => entry.id)).toEqual(["r1"]);
   });
 });
 

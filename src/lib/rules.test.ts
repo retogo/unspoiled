@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { countMatching, fold, matchingRule, nextRuleId, type Rule, type RuleScope } from "./rules";
+import { countMatching, fold, matchingRule, nextRuleId, type Rule } from "./rules";
 
-function rule(phrases: string[], overrides: { id?: string; scope?: RuleScope } = {}): Rule {
-  return { id: "r1", phrases, label: phrases[0], scope: "article", origin: "reader", at: 0, ...overrides };
+function rule(phrases: string[], overrides: { id?: string } = {}): Rule {
+  return { id: "r1", phrases, label: phrases[0], origin: "reader", at: 0, ...overrides };
 }
 
 function agentRule(phrases: string[], id: string): Rule {
@@ -10,7 +10,6 @@ function agentRule(phrases: string[], id: string): Rule {
     id,
     phrases,
     label: "What the agent took down",
-    scope: "article",
     origin: "agent",
     reason: "you are watching it tonight",
     at: 0,

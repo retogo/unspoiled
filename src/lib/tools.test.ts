@@ -114,7 +114,7 @@ function harness(sensitivity?: number) {
     /** The reader typing a phrase into "Always hide", which the tools see as one more rule. */
     addReaderRule: (phrase: string) => {
       const added: Rule[] = namedRules(
-        [{ phrases: [phrase], label: phrase, scope: "article", origin: "reader" }],
+        [{ phrases: [phrase], label: phrase, origin: "reader" }],
         policy.rules,
         0,
       );
@@ -386,7 +386,7 @@ describe("add_rules", () => {
   it("reports what each rule was named and how far it reached", () => {
     const result = harness().call("add_rules", { rules: [twist] });
     expect(result.added).toEqual([
-      { id: "r1", label: "What the reviewers made of the film", scope: "article", matched_sentences: 1 },
+      { id: "r1", label: "What the reviewers made of the film", matched_sentences: 1 },
     ]);
   });
 
@@ -394,9 +394,12 @@ describe("add_rules", () => {
     expect(harness(0).call("add_rules", { rules: [twist] }).sentences).toEqual({ total: 7, shown: 6, hidden: 1 });
   });
 
-  it("takes a rule that follows the reader to every article", () => {
+  /* An agent written against an older page may still send a scope. There is only one now. */
+  it("ignores a scope an agent still sends, rather than failing the call", () => {
     const result = harness().call("add_rules", { rules: [{ ...twist, scope: "all" }] });
-    expect((result.added as unknown as { scope: string }[])[0].scope).toBe("all");
+    expect(result.added).toEqual([
+      { id: "r1", label: "What the reviewers made of the film", matched_sentences: 1 },
+    ]);
   });
 
   it("adds every rule of one call", () => {
@@ -458,7 +461,6 @@ describe("add_rules", () => {
         articleKey: "en:Fight Club",
         articleTitle: "Fight Club",
         label: "What the reviewers made of the film",
-        scope: "article",
         reason: "you are watching it tonight",
       },
     ]);
@@ -523,7 +525,7 @@ describe("get_masking_report", () => {
       rules: [{ phrases: ["Tyler"], label: "The other man in it", reason: "you are watching it tonight" }],
     });
     expect(call("get_masking_report").rules).toEqual([
-      { id: "r1", label: "The other man in it", scope: "article", origin: "agent", matched_sentences: 1 },
+      { id: "r1", label: "The other man in it", origin: "agent", matched_sentences: 1 },
     ]);
   });
 

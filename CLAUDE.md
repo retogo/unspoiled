@@ -38,9 +38,9 @@ at the root). The reader must work with no agent attached; the tools are an addi
   nothing: it appears as "0 shown · 0 hidden" with its reason. A silent no-op is a decision the
   reader cannot disagree with. Every rule an agent adds is recorded the same way, as a `rule`
   decision beside the masks.
-- `add_rules` withholds every sentence carrying one of a rule's `phrases`, wherever it appears and
-  at every sensitivity. The reader is shown the rule's `label`, its `scope`, its `reason` and how
-  many sentences of the article now open it reached, all of it without opening anything; only the
+- `add_rules` withholds every sentence carrying one of a rule's `phrases`, wherever it appears, in
+  every article and at every sensitivity. The reader is shown the rule's `label`, its `reason` and
+  how many sentences of the article now open it reached, all of it without opening anything; only the
   phrases are behind `Show phrases`, because the phrase an agent picks to catch a spoiler is very
   often the spoiler. A rule whose `label` contains one of its own phrases fails the call, as does
   one with no phrase, no label or no reason — and one bad rule refuses the whole call rather than
@@ -68,9 +68,9 @@ at the root). The reader must work with no agent attached; the tools are an addi
   article currently open. Reset article-scoped policy on article change; never trust ids from a URL.
   Sensitivity belongs to the reader and survives the change, and so does the log in `decisions`:
   those ids are never applied again, and the reader keeps the record of what was decided for them.
-  A rule is phrases rather than ids, so it survives too: `all` follows the reader to the next
-  article and takes effect there without a reload, `article` waits for the one it was made on. The
-  match count beside a rule is counted against the article now open.
+  A rule is phrases rather than ids, so it survives too: every rule applies to every article, takes
+  effect on the next one without a reload, and is stored on the reader's device past the session.
+  The match count beside a rule is counted against the article now open.
 - Sensitivity and "Always hide" are the reader's two controls, and the safety net for a reader with
   no agent attached. No tool sets the slider; `get_masking_report` reports it. They are the only
   things the sidebar holds, and "Always hide" sits open in it rather than folded, because a rule

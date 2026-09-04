@@ -321,7 +321,6 @@ describe("a rule the reader or their agent added", () => {
     id: "r1",
     phrases: ["eleven weeks"],
     label: "eleven weeks",
-    scope: "article",
     origin: "reader",
     at: 0,
   };
@@ -330,7 +329,6 @@ describe("a rule the reader or their agent added", () => {
     id: "r2",
     phrases: ["eleven weeks"],
     label: "How long the shoot ran",
-    scope: "article",
     origin: "agent",
     reason: "you asked not to know how it was made",
     at: 0,

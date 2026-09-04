@@ -112,13 +112,12 @@ describe("a phrase the reader always wants hidden", () => {
     expect((field() as HTMLInputElement).value).toBe("");
   });
 
-  it("lists the phrase the reader typed, and where it applies", async () => {
+  it("lists the phrase the reader typed", async () => {
     await open("Fight Club (film)");
 
     await add("studio");
 
     expect(within(ruleList()).getByText("studio")).toBeTruthy();
-    expect(within(ruleList()).getByText(/this article/)).toBeTruthy();
   });
 
   it("says how much of the article it reaches", async () => {
@@ -156,17 +155,22 @@ describe("a phrase the reader always wants hidden", () => {
   });
 });
 
-describe("where a phrase applies", () => {
-  it("holds only on the article it was made on", async () => {
+/**
+ * A rule is phrases rather than sentence ids, so nothing about it belongs to one article: it holds
+ * wherever the reader goes next. What is recounted there is how far it reaches on the page in front
+ * of them.
+ */
+describe("a phrase on the article the reader moves on to", () => {
+  it("holds there too, without the page being reloaded", async () => {
     await open("Fight Club (film)");
     await add("studio");
 
     await goTo("The Sixth Sense");
 
-    expect(screen.getByText(WILLIS)).toBeTruthy();
+    expect(screen.queryByText(WILLIS)).toBeNull();
   });
 
-  it("comes back with the article it was made on", async () => {
+  it("still holds on the article it was made on", async () => {
     await open("Fight Club (film)");
     await add("studio");
     await goTo("The Sixth Sense");
@@ -176,21 +180,14 @@ describe("where a phrase applies", () => {
     expect(screen.queryByText(PITT)).toBeNull();
   });
 
-  it("follows the reader to every article when they say so", async () => {
+  it("counts the sentences of the article now open", async () => {
     await open("Fight Club (film)");
-
-    await userEvent.click(screen.getByRole("button", { name: "Every article" }));
     await add("studio");
+    expect(within(ruleList()).getByText("1 sentence withheld")).toBeTruthy();
+
     await goTo("The Sixth Sense");
 
-    expect(screen.queryByText(WILLIS)).toBeNull();
-  });
-
-  it("offers only the scope that means anything while no article is open", async () => {
-    render(<App />);
-
-    expect(screen.queryByRole("button", { name: "This article only" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Every article" })).toBeNull();
+    expect(within(ruleList()).getByText("2 sentences withheld")).toBeTruthy();
   });
 });
 
@@ -304,27 +301,16 @@ describe("a rule the reader's agent added", () => {
  * about it is recounted for that article rather than carried over from the last one.
  */
 describe("an agent's rule when the reader moves on to another article", () => {
-  const EVERYWHERE = { ...AGENTS_RULE, scope: "all" };
-
   it("holds on the next article without the page being reloaded", async () => {
     const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
 
     await goTo("The Sixth Sense");
 
     expect(screen.queryByText(WILLIS)).toBeNull();
   });
 
-  it("holds only on the article it was made on when the agent did not say otherwise", async () => {
-    const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
-
-    await goTo("The Sixth Sense");
-
-    expect(screen.getByText(WILLIS)).toBeTruthy();
-  });
-
-  it("comes back with the article it was made on", async () => {
+  it("still holds on the article it was made on", async () => {
     const registered = await openWithAgent("Fight Club (film)");
     await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
     await goTo("The Sixth Sense");
@@ -336,7 +322,7 @@ describe("an agent's rule when the reader moves on to another article", () => {
 
   it("counts the sentences of the article now open, not the one it was made on", async () => {
     const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
     expect(within(ruleList()).getByText(/1 sentence withheld/)).toBeTruthy();
 
     await goTo("The Sixth Sense");
@@ -346,7 +332,7 @@ describe("an agent's rule when the reader moves on to another article", () => {
 
   it("still names itself and its reason there, with nothing left for the reader to open", async () => {
     const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
 
     await goTo("The Sixth Sense");
 
@@ -354,14 +340,13 @@ describe("an agent's rule when the reader moves on to another article", () => {
     /* The drawer opened itself when the rule landed and is still open on the article after it. */
     expect((row.closest("details") as HTMLDetailsElement).open).toBe(true);
     expect(row.textContent).toContain("you said you want to watch it cold");
-    expect(row.textContent).toContain("all articles");
     expect(row.textContent).toContain("2 sentences withheld");
     expect(row.textContent).not.toContain("studio");
   });
 
   it("keeps its phrases behind the same mask on the new article", async () => {
     const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
 
     await goTo("The Sixth Sense");
 
@@ -371,7 +356,7 @@ describe("an agent's rule when the reader moves on to another article", () => {
 
   it("keeps its place in the record, named with the article it was made on", async () => {
     const registered = await openWithAgent("Fight Club (film)");
-    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
 
     await goTo("The Sixth Sense");
 
@@ -418,14 +403,14 @@ describe("the Always hide drawer", () => {
     expect(drawer().open).toBe(true);
   });
 
-  it("counts the rules in force on the article the reader has open", async () => {
+  it("counts every rule the reader holds, on whichever article they are reading", async () => {
     await open("Fight Club (film)");
     await add("studio");
     expect(screen.getByText("Always hide · 1")).toBeTruthy();
 
     await goTo("The Sixth Sense");
 
-    expect(screen.getByText("Always hide")).toBeTruthy();
+    expect(screen.getByText("Always hide · 1")).toBeTruthy();
   });
 
   it("says nothing where there is nothing to say", async () => {
@@ -507,7 +492,7 @@ describe("the shape of a rule row", () => {
 
     const row = rowFor("studio");
     expect(within(row).getByRole("img", { name: "Added by you" })).toBeTruthy();
-    expect(within(row).getByText("this article · 1 sentence withheld")).toBeTruthy();
+    expect(within(row).getByText("1 sentence withheld")).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Stop hiding studio" })).toBeTruthy();
   });
 
@@ -528,7 +513,7 @@ describe("the shape of a rule row", () => {
 
     const row = rowFor("How the film came to be made");
     expect(within(row).getByRole("img", { name: "Added by your agent" })).toBeTruthy();
-    expect(within(row).getByText("this article · 1 sentence withheld")).toBeTruthy();
+    expect(within(row).getByText("1 sentence withheld")).toBeTruthy();
     expect(within(row).getByRole("button", { name: /may contain spoilers/ })).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Stop hiding How the film came to be made" })).toBeTruthy();
   });
@@ -564,9 +549,7 @@ describe("rules the reader has kept", () => {
 
     await add("studio");
 
-    expect(JSON.parse(stored() ?? "{}")).toMatchObject({
-      byArticle: { "en:Fight Club (film)": [{ phrases: ["studio"], scope: "article", origin: "reader" }] },
-    });
+    expect(JSON.parse(stored() ?? "[]")).toMatchObject([{ phrases: ["studio"], origin: "reader" }]);
   });
 
   it("ignores a stored value it cannot read", async () => {

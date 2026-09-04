@@ -1,5 +1,5 @@
 import { strongestCategory, type SpoilerCategory } from "./categories";
-import { matchingRule, type Rule, type RuleOrigin, type RuleScope } from "./rules";
+import { matchingRule, type Rule, type RuleOrigin } from "./rules";
 import type { Article, Section, Sentence } from "./segment";
 import { isLead } from "./segment";
 
@@ -174,7 +174,6 @@ export type MaskDecision = DecisionMade & {
 export type RuleDecision = DecisionMade & {
   kind: "rule";
   label: string;
-  scope: RuleScope;
 };
 
 /** Everything the agent has done to this page, in the order it did it. */
@@ -233,7 +232,7 @@ export function ruleDecisions(
 ): RuleDecision[] {
   return rules.flatMap((rule) =>
     rule.origin === "agent"
-      ? [{ kind: "rule" as const, at, ...on, label: rule.label, scope: rule.scope, reason: rule.reason }]
+      ? [{ kind: "rule" as const, at, ...on, label: rule.label, reason: rule.reason }]
       : [],
   );
 }

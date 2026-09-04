@@ -32,9 +32,8 @@ import {
   type Section,
   type Sentence,
 } from "./lib/segment";
-import { countMatching, namedRules, type Rule, type RuleDraft, type RuleOrigin, type RuleScope } from "./lib/rules";
+import { countMatching, namedRules, type Rule, type RuleDraft, type RuleOrigin } from "./lib/rules";
 import {
-  allRules,
   articleKey,
   historyActionFor,
   policyForOpened,
@@ -43,7 +42,6 @@ import {
   readSessionStart,
   recordScanned,
   RULES_KEY,
-  rulesFor,
   scannedElsewhere,
   scannedForArticle,
   storedWith,
@@ -107,12 +105,6 @@ const SENSITIVITY_PRESETS: { sensitivity: number; label: string; hint: string }[
 const LANGUAGES: { lang: Lang; label: string; title: string }[] = [
   { lang: "en", label: "EN", title: "Search the English Wikipedia" },
   { lang: "ja", label: "JA", title: "Search the Japanese Wikipedia" },
-];
-
-/** Where a new rule applies. The article it was made on is the safer default, so it comes first. */
-const RULE_SCOPES: { scope: RuleScope; label: string }[] = [
-  { scope: "article", label: "This article only" },
-  { scope: "all", label: "Every article" },
 ];
 
 /* One button rather than three, so the icon has to carry the whole state. Stroked in the current
@@ -247,7 +239,7 @@ function decisionScale(decision: Decision): string {
   if (decision.kind === "mask") {
     return `${decision.show.length} shown · ${decision.hide.length} hidden`;
   }
-  return `always hides ${decision.label} · ${decision.scope === "all" ? "every article" : "this article"}`;
+  return `always hides ${decision.label}`;
 }
 
 /** Long enough to read a reason, short enough that the reader is not made to dismiss it. */
@@ -258,7 +250,7 @@ export default function App() {
     readSessionStart(
       window.location.search,
       window.localStorage.getItem(SENSITIVITY_KEY),
-      rulesFor(readRuleStore(window.localStorage.getItem(RULES_KEY)), readArticleTarget(window.location.search)),
+      readRuleStore(window.localStorage.getItem(RULES_KEY)),
     ),
   );
   const [lang, setLang] = useState<Lang>(start.article?.lang ?? "en");
@@ -307,12 +299,7 @@ export default function App() {
       const fetched = await fetchArticle(nextLang, title);
       if (openRequestRef.current !== request) return { status: "superseded" };
       const opened = segmentArticle(fetched);
-      const opening = policyForOpened(
-        policyRef.current,
-        articleRef.current,
-        opened,
-        rulesFor(ruleStoreRef.current, opened),
-      );
+      const opening = policyForOpened(policyRef.current, articleRef.current, opened, ruleStoreRef.current);
       setArticle(opened);
       setPolicy(opening);
       setLoading(false);
@@ -332,7 +319,7 @@ export default function App() {
     setArticle(null);
     setError(null);
     setLoading(false);
-    setPolicy((current) => ({ ...current, rules: rulesFor(ruleStoreRef.current, null) }));
+    setPolicy((current) => ({ ...current, rules: ruleStoreRef.current }));
   }, []);
 
   /**
@@ -357,7 +344,7 @@ export default function App() {
       : [];
     const kept: Policy = {
       ...policyRef.current,
-      rules: rulesFor(next, open),
+      rules: next,
       decisions: [...policyRef.current.decisions, ...recorded],
     };
     setPolicy(kept);
@@ -365,26 +352,25 @@ export default function App() {
   }, []);
 
   /**
-   * The page names each rule and files it where its scope says, so neither the reader nor their
-   * agent can overwrite a rule already there. The policy it made is handed back, because the tool
-   * has to report what the reader is now seeing without waiting for a re-render.
+   * The page names each rule itself, so neither the reader nor their agent can overwrite a rule
+   * already there. The policy it made is handed back, because the tool has to report what the
+   * reader is now seeing without waiting for a re-render.
    */
   const addRules = useCallback(
     (drafts: RuleDraft[]) => {
-      const open = articleRef.current;
       const store = ruleStoreRef.current;
-      const added = namedRules(drafts, allRules(store), Date.now());
-      const next = storedWith(store, open ? articleKey(open.lang, open.title) : null, added);
+      const added = namedRules(drafts, store, Date.now());
+      const next = storedWith(store, added);
       return { added, policy: keepRules(next, added) };
     },
     [keepRules],
   );
 
   const addRule = useCallback(
-    (phrase: string, scope: RuleScope) => {
+    (phrase: string) => {
       const wanted = phrase.trim();
       if (wanted === "") return;
-      addRules([{ phrases: [wanted], label: wanted, scope, origin: "reader" }]);
+      addRules([{ phrases: [wanted], label: wanted, origin: "reader" }]);
     },
     [addRules],
   );
@@ -737,7 +723,6 @@ export default function App() {
           */}
           <AlwaysHide
             rules={policy.rules}
-            scoped={article !== null}
             matched={(rule) => countMatching(rule, sentenceTexts)}
             open={rulesOpen}
             onOpen={setRulesOpen}
@@ -917,7 +902,6 @@ function ReadWarning({ sections }: { sections: string[] }) {
  */
 function AlwaysHide({
   rules,
-  scoped,
   matched,
   open,
   onOpen,
@@ -925,7 +909,6 @@ function AlwaysHide({
   onRemove,
 }: {
   rules: Rule[];
-  scoped: boolean;
   matched: (rule: Rule) => number;
   /**
    * Whether the drawer stands open. It is the page's rather than this component's, because what
@@ -934,11 +917,10 @@ function AlwaysHide({
    */
   open: boolean;
   onOpen: (open: boolean) => void;
-  onAdd: (phrase: string, scope: RuleScope) => void;
+  onAdd: (phrase: string) => void;
   onRemove: (id: string) => void;
 }) {
   const [phrase, setPhrase] = useState("");
-  const [scope, setScope] = useState<RuleScope>("article");
 
   return (
     <details
@@ -950,7 +932,8 @@ function AlwaysHide({
         {rules.length > 0 ? `Always hide · ${rules.length}` : "Always hide"}
       </summary>
       <p className="mt-1 text-xs text-muted">
-        Every sentence carrying one of these comes off the page, whatever the slider says.
+        Every sentence carrying one of these comes off the page, in every article, whatever the
+        slider says.
       </p>
       <input
         aria-label="A word or phrase to always hide"
@@ -959,32 +942,11 @@ function AlwaysHide({
         onChange={(event) => setPhrase(event.target.value)}
         onKeyDown={(event) => {
           if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-          onAdd(phrase, scope);
+          onAdd(phrase);
           setPhrase("");
         }}
         className="mt-1.5 w-full rounded-lg border border-edge bg-surface px-2.5 py-1.5 text-sm placeholder:text-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
       />
-      {/* A rule made where no article is open has no article to belong to, so it follows the reader. */}
-      {scoped && (
-        <div
-          role="group"
-          aria-label="Where a new phrase applies"
-          className="mt-1.5 flex gap-0.5 rounded-full bg-raised p-0.5"
-        >
-          {RULE_SCOPES.map((option) => (
-            <button
-              key={option.scope}
-              onClick={() => setScope(option.scope)}
-              aria-pressed={scope === option.scope}
-              className={`flex-1 rounded-full px-2 py-1 text-xs font-medium ${
-                scope === option.scope ? "bg-ink text-inverse" : "text-muted hover:text-ink"
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
       {rules.length > 0 && (
         <ul aria-label="Phrases always hidden" className="mt-1.5 space-y-1 text-xs">
           {rules.map((rule) => (
@@ -1095,7 +1057,7 @@ function RuleRow({
       */}
       <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <span className="text-muted">
-          {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
+          {sentenceCount(matched)} withheld
         </span>
         <span className="ml-auto flex shrink-0 items-baseline gap-2">
           {rule.origin === "agent" && !showing && (

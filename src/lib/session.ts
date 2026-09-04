@@ -1,5 +1,5 @@
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Rule, RuleScope } from "./rules";
+import type { Rule } from "./rules";
 import type { Article } from "./segment";
 import type { Lang } from "./wikipedia";
 
@@ -101,18 +101,13 @@ export function policyForOpened(policy: Policy, open: Article | null, opened: Ar
 }
 
 /**
- * Every rule the reader has, split by where it applies: `all` follows them from article to
- * article, and each entry of `byArticle` belongs to the one it was made on. Both live in one
- * localStorage entry, because a rule is the reader's own setting and outlives the session.
+ * Every rule the reader holds. A rule is phrases rather than ids, so one list is the whole of it:
+ * it applies to every article and outlives the session in one localStorage entry, because a rule is
+ * the reader's own setting rather than anything about the article they happen to have open.
  */
-export type RuleStore = {
-  all: Rule[];
-  byArticle: Record<string, Rule[]>;
-};
+export type RuleStore = Rule[];
 
-const NO_RULES: RuleStore = { all: [], byArticle: {} };
-
-const SCOPES: RuleScope[] = ["article", "all"];
+const NO_RULES: RuleStore = [];
 
 /**
  * One stored entry, or null if it is not a rule. Nothing here is defensive about the page's own
@@ -122,28 +117,18 @@ const SCOPES: RuleScope[] = ["article", "all"];
  */
 function asRule(value: unknown): Rule | null {
   if (typeof value !== "object" || value === null) return null;
-  const { id, phrases, label, scope, origin, reason, at } = value as Record<string, unknown>;
+  const { id, phrases, label, origin, reason, at } = value as Record<string, unknown>;
   if (typeof id !== "string" || id === "") return null;
   if (typeof label !== "string" || label.trim() === "") return null;
   if (!Array.isArray(phrases)) return null;
   const kept = phrases.filter((phrase): phrase is string => typeof phrase === "string" && phrase.trim() !== "");
   if (kept.length !== phrases.length || kept.length === 0) return null;
-  const wanted = SCOPES.find((candidate) => candidate === scope);
-  if (!wanted) return null;
-  const body = { id, phrases: kept, label, scope: wanted, at: typeof at === "number" ? at : 0 };
+  const body = { id, phrases: kept, label, at: typeof at === "number" ? at : 0 };
   if (origin === "reader") return { ...body, origin };
   if (origin === "agent" && typeof reason === "string" && reason.trim() !== "") {
     return { ...body, origin, reason };
   }
   return null;
-}
-
-function asRules(value: unknown): Rule[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    const rule = asRule(entry);
-    return rule ? [rule] : [];
-  });
 }
 
 export function readRuleStore(raw: string | null): RuleStore {
@@ -154,51 +139,19 @@ export function readRuleStore(raw: string | null): RuleStore {
   } catch {
     return NO_RULES;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return NO_RULES;
-  const { all, byArticle } = parsed as Record<string, unknown>;
-  const buckets: Record<string, Rule[]> = {};
-  if (typeof byArticle === "object" && byArticle !== null && !Array.isArray(byArticle)) {
-    for (const [key, value] of Object.entries(byArticle)) {
-      const rules = asRules(value);
-      if (rules.length > 0) buckets[key] = rules;
-    }
-  }
-  return { all: asRules(all), byArticle: buckets };
+  if (!Array.isArray(parsed)) return NO_RULES;
+  return parsed.flatMap((entry) => {
+    const rule = asRule(entry);
+    return rule ? [rule] : [];
+  });
 }
 
-/** The rules in force on the article on screen, or on the search screen the ones that always are. */
-export function rulesFor(store: RuleStore, article: SharedArticle | null): Rule[] {
-  const key = article ? articleKey(article.lang, article.title) : null;
-  return [...store.all, ...(key === null ? [] : (store.byArticle[key] ?? []))];
-}
-
-/** Every rule the reader holds, wherever it applies. Their names are counted past all of these. */
-export function allRules(store: RuleStore): Rule[] {
-  return [...store.all, ...Object.values(store.byArticle).flat()];
-}
-
-/**
- * The store with these rules added, each one filed where its own scope says. A rule made for one
- * article needs that article, so the key is only absent on the search screen, where the only scope
- * the reader is offered is the one that follows them.
- */
-export function storedWith(store: RuleStore, key: string | null, rules: readonly Rule[]): RuleStore {
-  const all = [...store.all];
-  const byArticle = { ...store.byArticle };
-  for (const rule of rules) {
-    if (rule.scope === "all" || key === null) all.push({ ...rule, scope: "all" });
-    else byArticle[key] = [...(byArticle[key] ?? []), rule];
-  }
-  return { all, byArticle };
+export function storedWith(store: RuleStore, rules: readonly Rule[]): RuleStore {
+  return [...store, ...rules];
 }
 
 export function storedWithout(store: RuleStore, id: string): RuleStore {
-  const byArticle: Record<string, Rule[]> = {};
-  for (const [key, rules] of Object.entries(store.byArticle)) {
-    const kept = rules.filter((rule) => rule.id !== id);
-    if (kept.length > 0) byArticle[key] = kept;
-  }
-  return { all: store.all.filter((rule) => rule.id !== id), byArticle };
+  return store.filter((rule) => rule.id !== id);
 }
 
 export function scannedForArticle(scanned: ScannedSection[], article: Article | null): string[] {
