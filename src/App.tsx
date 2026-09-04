@@ -1073,31 +1073,39 @@ function RuleRow({
         <button
           onClick={() => setReading((open) => !open)}
           aria-expanded={reading}
-          className={`mt-0.5 block w-full text-left break-words text-muted ${reading ? "" : "line-clamp-2"}`}
+          /* `line-clamp-2` sets its own display, so the open state is the only one that says `block`. */
+          className={`mt-0.5 w-full text-left break-words text-muted ${reading ? "block" : "line-clamp-2"}`}
         >
           {rule.reason}
         </button>
       )}
-      <div className="mt-0.5 flex items-baseline gap-2">
-        <span className="min-w-0 flex-1 text-muted">
+      {/*
+        The sidebar is too narrow to promise all three of these a line, so the buttons travel
+        together: they sit out to the right of the count where there is room, and drop to a line of
+        their own where there is not, rather than breaking the count across three ragged lines.
+      */}
+      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-muted">
           {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
         </span>
-        {rule.origin === "agent" && !showing && (
+        <span className="ml-auto flex shrink-0 items-baseline gap-2">
+          {rule.origin === "agent" && !showing && (
+            <button
+              onClick={() => setShowing(true)}
+              aria-label="Show the phrases your agent added — they may contain spoilers"
+              className="unspoiled-mask rounded bg-mask px-1.5 py-0.5 text-mask-ink hover:bg-mask-hover"
+            >
+              Show phrases
+            </button>
+          )}
           <button
-            onClick={() => setShowing(true)}
-            aria-label="Show the phrases your agent added — they may contain spoilers"
-            className="unspoiled-mask shrink-0 rounded bg-mask px-1.5 py-0.5 text-mask-ink hover:bg-mask-hover"
+            onClick={() => onRemove(rule.id)}
+            aria-label={`Stop hiding ${rule.label}`}
+            className="text-muted hover:text-ink"
           >
-            Show phrases
+            Remove
           </button>
-        )}
-        <button
-          onClick={() => onRemove(rule.id)}
-          aria-label={`Stop hiding ${rule.label}`}
-          className="shrink-0 text-muted hover:text-ink"
-        >
-          Remove
-        </button>
+        </span>
       </div>
       {rule.origin === "agent" && showing && (
         <span
