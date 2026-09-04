@@ -115,10 +115,69 @@ const RULE_SCOPES: { scope: RuleScope; label: string }[] = [
   { scope: "all", label: "Every article" },
 ];
 
-const THEMES: { choice: ThemeChoice; label: string }[] = [
-  { choice: "light", label: "Light" },
-  { choice: "dark", label: "Dark" },
-  { choice: "system", label: "System" },
+/* One button rather than three, so the icon has to carry the whole state. Stroked in the current
+   colour and sized to the header line, like the marks beside a rule. */
+function SunMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="size-4"
+    >
+      <circle cx="8" cy="8" r="3.25" />
+      <path d="M8 1.25v1.5M8 13.25v1.5M14.75 8h-1.5M2.75 8h-1.5M12.77 3.23l-1.06 1.06M4.29 11.71l-1.06 1.06M12.77 12.77l-1.06-1.06M4.29 4.29L3.23 3.23" />
+    </svg>
+  );
+}
+
+function MoonMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="size-4"
+    >
+      <path d="M13.5 9.75A5.75 5.75 0 0 1 6.25 2.5a5.75 5.75 0 1 0 7.25 7.25Z" />
+    </svg>
+  );
+}
+
+function MonitorMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="size-4"
+    >
+      <rect x="1.75" y="2.75" width="12.5" height="8.5" rx="1.5" />
+      <path d="M5.75 14.25h4.5M8 11.25v3" />
+    </svg>
+  );
+}
+
+/*
+ * The three the control turns through, in the order it turns through them. `system` comes last
+ * because it is where the page starts and where a reader who has changed their mind hands it back.
+ */
+const THEMES: { choice: ThemeChoice; label: string; Mark: () => ReactNode }[] = [
+  { choice: "light", label: "Light", Mark: SunMark },
+  { choice: "dark", label: "Dark", Mark: MoonMark },
+  { choice: "system", label: "System", Mark: MonitorMark },
 ];
 
 /**
@@ -582,20 +641,7 @@ export default function App() {
                 ? `This page could not expose its tools — ${registration.error}`
                 : `${registration.toolCount} tools exposed via ${registration.api}`}
           </span>
-          <div role="group" aria-label="Page theme" className="flex gap-0.5 rounded-full bg-raised p-0.5">
-            {THEMES.map((option) => (
-              <button
-                key={option.choice}
-                onClick={() => chooseTheme(option.choice)}
-                aria-pressed={theme === option.choice}
-                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                  theme === option.choice ? "bg-ink text-inverse" : "text-muted hover:text-ink"
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <ThemeToggle theme={theme} onChoose={chooseTheme} />
         </div>
       </header>
 
@@ -787,6 +833,29 @@ export default function App() {
         . Unspoiled is not affiliated with Wikipedia or the Wikimedia Foundation.
       </footer>
     </div>
+  );
+}
+
+/**
+ * The theme, as one button that turns through the three. An icon says where it is now, and its name
+ * says that and where the next press goes, because a reader who cannot see the icon would otherwise
+ * be pressing a button that never says what it does.
+ */
+function ThemeToggle({ theme, onChoose }: { theme: ThemeChoice; onChoose: (choice: ThemeChoice) => void }) {
+  const at = THEMES.findIndex((option) => option.choice === theme);
+  const current = THEMES[at];
+  const next = THEMES[(at + 1) % THEMES.length];
+  const name = `Theme: ${current.label}. Switch to ${next.label}`;
+
+  return (
+    <button
+      onClick={() => onChoose(next.choice)}
+      aria-label={name}
+      title={name}
+      className="rounded-full p-1.5 text-muted hover:bg-raised hover:text-ink"
+    >
+      <current.Mark />
+    </button>
   );
 }
 

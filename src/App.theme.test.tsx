@@ -8,8 +8,13 @@ function painted(): string | undefined {
   return document.documentElement.dataset.theme;
 }
 
-function choice(label: string): HTMLElement {
-  return screen.getByRole("button", { name: label });
+/** The one theme control, named for where it is and where the next press will take it. */
+function toggle(): HTMLElement {
+  return screen.getByRole("button", { name: /^Theme: / });
+}
+
+function switchTo(label: string): Promise<void> {
+  return userEvent.click(screen.getByRole("button", { name: new RegExp(`Switch to ${label}$`) }));
 }
 
 beforeEach(() => {
@@ -45,20 +50,34 @@ describe("the page theme", () => {
     expect(painted()).toBe("dark");
   });
 
-  it("paints and remembers the theme the reader picks", async () => {
+  it("paints and remembers the theme the reader turns it to", async () => {
     render(<App />);
 
-    await userEvent.click(choice("Dark"));
+    await switchTo("Light");
+    await switchTo("Dark");
 
     expect(painted()).toBe("dark");
     expect(window.localStorage.getItem("unspoiled.theme")).toBe("dark");
   });
 
-  it("keeps a reader who picked light on light under a dark system", async () => {
+  it("turns light, then dark, then back to the system", async () => {
+    render(<App />);
+
+    await switchTo("Light");
+    expect(window.localStorage.getItem("unspoiled.theme")).toBe("light");
+
+    await switchTo("Dark");
+    expect(window.localStorage.getItem("unspoiled.theme")).toBe("dark");
+
+    await switchTo("System");
+    expect(window.localStorage.getItem("unspoiled.theme")).toBe("system");
+  });
+
+  it("keeps a reader who turned it to light on light under a dark system", async () => {
     systemPrefersDark(true);
     render(<App />);
 
-    await userEvent.click(choice("Light"));
+    await switchTo("Light");
 
     expect(painted()).toBe("light");
   });
@@ -71,9 +90,9 @@ describe("the page theme", () => {
     expect(painted()).toBe("dark");
   });
 
-  it("stops following the system once the reader has picked a theme", async () => {
+  it("stops following the system once the reader has turned it somewhere", async () => {
     render(<App />);
-    await userEvent.click(choice("Light"));
+    await switchTo("Light");
 
     systemSwitchesTo("dark");
 
@@ -82,21 +101,29 @@ describe("the page theme", () => {
 
   it("follows the system again when the reader hands it back", async () => {
     render(<App />);
-    await userEvent.click(choice("Light"));
+    await switchTo("Light");
+    await switchTo("Dark");
 
-    await userEvent.click(choice("System"));
+    await switchTo("System");
     systemSwitchesTo("dark");
 
     expect(painted()).toBe("dark");
   });
 
-  it("says which theme is in use for a reader who cannot see it", async () => {
+  /* The icon says where the theme is; the name has to say that and where the next press goes. */
+  it("says where it is and where the next press takes it", async () => {
     render(<App />);
-    expect(choice("System").getAttribute("aria-pressed")).toBe("true");
+    expect(toggle().getAttribute("aria-label")).toBe("Theme: System. Switch to Light");
+    expect(toggle().getAttribute("title")).toBe("Theme: System. Switch to Light");
 
-    await userEvent.click(choice("Dark"));
+    await switchTo("Light");
 
-    expect(choice("Dark").getAttribute("aria-pressed")).toBe("true");
-    expect(choice("System").getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().getAttribute("aria-label")).toBe("Theme: Light. Switch to Dark");
+  });
+
+  it("is one control rather than three", () => {
+    render(<App />);
+
+    expect(screen.getAllByRole("button", { name: /^Theme: / })).toHaveLength(1);
   });
 });
