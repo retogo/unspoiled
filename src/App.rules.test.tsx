@@ -380,6 +380,69 @@ describe("an agent's rule when the reader moves on to another article", () => {
   });
 });
 
+/**
+ * Every rule reads the same way down the sidebar, whoever made it: what is hidden, why, and how far
+ * it reaches. Only the middle line is an agent's to fill, and only the icon says whose rule it is.
+ */
+describe("the shape of a rule row", () => {
+  const LONG_REASON = {
+    ...AGENTS_RULE,
+    reason:
+      "you told me you are watching this one tonight with someone who has not seen it, and you asked me to keep everything about how it was put together away from you until you have both finished it",
+  };
+
+  function rowFor(name: string): HTMLElement {
+    return within(ruleList()).getByText(name).closest("li") as HTMLElement;
+  }
+
+  it("names the reader's own phrase, and marks it as theirs", async () => {
+    await open("Fight Club (film)");
+
+    await add("studio");
+
+    const row = rowFor("studio");
+    expect(within(row).getByRole("img", { name: "Added by you" })).toBeTruthy();
+    expect(within(row).getByText("this article · 1 sentence withheld")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Stop hiding studio" })).toBeTruthy();
+  });
+
+  it("gives the reader's own rule no reason to read and nothing to uncover", async () => {
+    await open("Fight Club (film)");
+
+    await add("studio");
+
+    const row = rowFor("studio");
+    expect(within(row).queryByRole("button", { name: /may contain spoilers/ })).toBeNull();
+    expect(within(row).queryByRole("button", { expanded: false })).toBeNull();
+  });
+
+  it("names an agent's rule by its label, and marks it as the agent's", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    const row = rowFor("How the film came to be made");
+    expect(within(row).getByRole("img", { name: "Added by your agent" })).toBeTruthy();
+    expect(within(row).getByText("this article · 1 sentence withheld")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: /may contain spoilers/ })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Stop hiding How the film came to be made" })).toBeTruthy();
+  });
+
+  it("folds a long reason away until the reader asks for the rest of it", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [LONG_REASON] });
+
+    const reason = within(rowFor("How the film came to be made")).getByRole("button", {
+      name: LONG_REASON.reason,
+    });
+    expect(reason.getAttribute("aria-expanded")).toBe("false");
+
+    await userEvent.click(reason);
+
+    expect(reason.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
 describe("rules the reader has kept", () => {
   it("are still theirs the next time the page opens", async () => {
     await open("Fight Club (film)");

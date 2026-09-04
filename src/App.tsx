@@ -32,7 +32,7 @@ import {
   type Section,
   type Sentence,
 } from "./lib/segment";
-import { countMatching, namedRules, type Rule, type RuleDraft, type RuleScope } from "./lib/rules";
+import { countMatching, namedRules, type Rule, type RuleDraft, type RuleOrigin, type RuleScope } from "./lib/rules";
 import {
   allRules,
   articleKey,
@@ -888,11 +888,60 @@ function AlwaysHide({
   );
 }
 
+/*
+ * Icons rather than words for who made a rule: the row already carries a label, a reason and a
+ * count, and a fourth piece of text would crowd out the three that say what the rule does. They are
+ * stroked in the current colour and sized to the line they sit in, and the name is on the wrapper
+ * so a reader who cannot see them is told the same thing.
+ */
+function AgentMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="size-3.5"
+    >
+      <path d="M8 1.75v2.25" />
+      <rect x="2.5" y="4" width="11" height="9.5" rx="2.75" />
+      <path d="M6 7.75v1.5M10 7.75v1.5" />
+    </svg>
+  );
+}
+
+function ReaderMark() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="size-3.5"
+    >
+      <circle cx="8" cy="5.25" r="2.75" />
+      <path d="M2.75 13.75a5.25 5.25 0 0 1 10.5 0" />
+    </svg>
+  );
+}
+
+const ORIGIN_MARKS: Record<RuleOrigin, { name: string; Mark: () => ReactNode }> = {
+  agent: { name: "Added by your agent", Mark: AgentMark },
+  reader: { name: "Added by you", Mark: ReaderMark },
+};
+
 /**
- * One standing rule: what it is called, how far it reaches, and the button that takes it down. The
- * reader's own phrase is its own label. An agent's rule is shown by the label and the reason it
- * gave, and its phrases stand behind the same mask a withheld sentence does: "the fate of a main
- * character" is safe to read, and the phrase that catches it is the thing the reader is avoiding.
+ * One standing rule, in three lines that read the same whoever made it: what is hidden, why, and
+ * how far it reaches. The reader's own phrase is its own label. An agent's rule is shown by the
+ * label and the reason it gave, and its phrases stand behind the same mask a withheld sentence
+ * does: "the fate of a main character" is safe to read, and the phrase that catches it is the thing
+ * the reader is avoiding.
  */
 function RuleRow({
   rule,
@@ -904,13 +953,45 @@ function RuleRow({
   onRemove: (id: string) => void;
 }) {
   const [showing, setShowing] = useState(false);
+  const [reading, setReading] = useState(false);
   const phrases = rule.phrases.join(", ");
   const hide = () => setShowing(false);
+  const { name, Mark } = ORIGIN_MARKS[rule.origin];
 
   return (
     <li className="rounded-lg border border-line bg-surface px-2.5 py-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 font-medium break-words">{rule.label}</span>
+      <div className="flex items-baseline gap-2">
+        <span className="min-w-0 flex-1 font-medium break-words">{rule.label}</span>
+        <span role="img" aria-label={name} title={name} className="shrink-0 self-center text-faint">
+          <Mark />
+        </span>
+      </div>
+      {/*
+        A reason can run to several lines, and the reader is looking for the rule rather than
+        reading the agent. Two lines is enough to know which rule this is; the rest is one tap away.
+      */}
+      {rule.origin === "agent" && (
+        <button
+          onClick={() => setReading((open) => !open)}
+          aria-expanded={reading}
+          className={`mt-0.5 block w-full text-left break-words text-muted ${reading ? "" : "line-clamp-2"}`}
+        >
+          {rule.reason}
+        </button>
+      )}
+      <div className="mt-0.5 flex items-baseline gap-2">
+        <span className="min-w-0 flex-1 text-muted">
+          {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
+        </span>
+        {rule.origin === "agent" && !showing && (
+          <button
+            onClick={() => setShowing(true)}
+            aria-label="Show the phrases your agent added — they may contain spoilers"
+            className="unspoiled-mask shrink-0 rounded bg-mask px-1.5 py-0.5 text-mask-ink hover:bg-mask-hover"
+          >
+            Show phrases
+          </button>
+        )}
         <button
           onClick={() => onRemove(rule.id)}
           aria-label={`Stop hiding ${rule.label}`}
@@ -919,36 +1000,23 @@ function RuleRow({
           Remove
         </button>
       </div>
-      {rule.origin === "agent" && <span className="block text-muted">{rule.reason}</span>}
-      <span className="block text-muted">
-        {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
-      </span>
-      {rule.origin === "agent" &&
-        (showing ? (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label={phrases}
-            title="Hide these phrases again"
-            onClick={hide}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              hide();
-            }}
-            className={`mt-1 block break-words ${OPENED}`}
-          >
-            {phrases}
-          </span>
-        ) : (
-          <button
-            onClick={() => setShowing(true)}
-            aria-label="Show the phrases your agent added — they may contain spoilers"
-            className="unspoiled-mask mt-1 rounded bg-mask px-1.5 py-0.5 text-mask-ink hover:bg-mask-hover"
-          >
-            Show phrases
-          </button>
-        ))}
+      {rule.origin === "agent" && showing && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={phrases}
+          title="Hide these phrases again"
+          onClick={hide}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            hide();
+          }}
+          className={`mt-1 block break-words ${OPENED}`}
+        >
+          {phrases}
+        </span>
+      )}
     </li>
   );
 }
