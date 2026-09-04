@@ -3,6 +3,12 @@ export type ToolDefinition = {
   description: string;
   inputSchema: Record<string, unknown>;
   execute: (input: Record<string, unknown>) => unknown;
+  /**
+   * What the reader is shown of a call's arguments, where the arguments themselves would give the
+   * article away. Every call is displayed, so a tool that takes spoiler text says here how to
+   * describe it instead.
+   */
+  summariseInput?: (input: Record<string, unknown>) => string;
 };
 
 export type ToolCall = {
@@ -117,7 +123,8 @@ function dispatch(name: string) {
     const input = parseInput(raw);
     const { ok, value } = await runTool(entry.definition, input);
     const text = JSON.stringify(value);
-    entry.onCall({ at: Date.now(), tool: name, input: JSON.stringify(input), ok, summary: `${text.length} chars` });
+    const shown = entry.definition.summariseInput?.(input) ?? JSON.stringify(input);
+    entry.onCall({ at: Date.now(), tool: name, input: shown, ok, summary: `${text.length} chars` });
     return reply(value, ok);
   };
 }

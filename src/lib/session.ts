@@ -1,5 +1,5 @@
 import { DEFAULT_SENSITIVITY, newPolicy, type Policy } from "./risk";
-import type { Rule, RuleOrigin, RuleScope } from "./rules";
+import type { Rule, RuleScope } from "./rules";
 import type { Article, Section } from "./segment";
 import type { Lang } from "./wikipedia";
 
@@ -115,12 +115,12 @@ export type RuleStore = {
 const NO_RULES: RuleStore = { all: [], byArticle: {} };
 
 const SCOPES: RuleScope[] = ["article", "all"];
-const ORIGINS: RuleOrigin[] = ["reader", "agent"];
 
 /**
  * One stored entry, or null if it is not a rule. Nothing here is defensive about the page's own
  * writing: localStorage is the reader's, an older version of this page may have written a different
- * shape into it, and a rule that arrived broken must not decide what is on the screen.
+ * shape into it, and a rule that arrived broken must not decide what is on the screen. An agent's
+ * rule with no reason left in it is one of those: the reader would have nothing to judge it by.
  */
 function asRule(value: unknown): Rule | null {
   if (typeof value !== "object" || value === null) return null;
@@ -130,17 +130,14 @@ function asRule(value: unknown): Rule | null {
   if (!Array.isArray(phrases)) return null;
   const kept = phrases.filter((phrase): phrase is string => typeof phrase === "string" && phrase.trim() !== "");
   if (kept.length !== phrases.length || kept.length === 0) return null;
-  if (!SCOPES.some((candidate) => candidate === scope)) return null;
-  if (!ORIGINS.some((candidate) => candidate === origin)) return null;
-  const rule: Rule = {
-    id,
-    phrases: kept,
-    label,
-    scope: scope as RuleScope,
-    origin: origin as RuleOrigin,
-    at: typeof at === "number" ? at : 0,
-  };
-  return typeof reason === "string" ? { ...rule, reason } : rule;
+  const wanted = SCOPES.find((candidate) => candidate === scope);
+  if (!wanted) return null;
+  const body = { id, phrases: kept, label, scope: wanted, at: typeof at === "number" ? at : 0 };
+  if (origin === "reader") return { ...body, origin };
+  if (origin === "agent" && typeof reason === "string" && reason.trim() !== "") {
+    return { ...body, origin, reason };
+  }
+  return null;
 }
 
 function asRules(value: unknown): Rule[] {

@@ -17,6 +17,7 @@ import {
   countHidden,
   hiddenSentenceReason,
   maskWith,
+  ruleDecisions,
   type Decision,
   type Policy,
 } from "./lib/risk";
@@ -30,7 +31,7 @@ import {
   type Section,
   type Sentence,
 } from "./lib/segment";
-import { countMatching, nextRuleId, type Rule, type RuleScope } from "./lib/rules";
+import { countMatching, namedRules, type Rule, type RuleDraft, type RuleScope } from "./lib/rules";
 import {
   allRules,
   articleKey,
@@ -240,6 +241,47 @@ export default function App() {
     setPolicy((current) => ({ ...current, rules: rulesFor(ruleStoreRef.current, null) }));
   }, []);
 
+  const keepRules = useCallback((next: RuleStore, added: readonly Rule[] = []): Policy => {
+    window.localStorage.setItem(RULES_KEY, JSON.stringify(next));
+    setRuleStore(next);
+    const kept: Policy = {
+      ...policyRef.current,
+      rules: rulesFor(next, articleRef.current),
+      decisions: [...policyRef.current.decisions, ...ruleDecisions(added, Date.now())],
+    };
+    setPolicy(kept);
+    return kept;
+  }, []);
+
+  /**
+   * The page names each rule and files it where its scope says, so neither the reader nor their
+   * agent can overwrite a rule already there. The policy it made is handed back, because the tool
+   * has to report what the reader is now seeing without waiting for a re-render.
+   */
+  const addRules = useCallback(
+    (drafts: RuleDraft[]) => {
+      const open = articleRef.current;
+      const store = ruleStoreRef.current;
+      const added = namedRules(drafts, allRules(store), Date.now());
+      const next = storedWith(store, open ? articleKey(open.lang, open.title) : null, added);
+      return { added, policy: keepRules(next, added) };
+    },
+    [keepRules],
+  );
+
+  const addRule = useCallback(
+    (phrase: string, scope: RuleScope) => {
+      const wanted = phrase.trim();
+      if (wanted === "") return;
+      addRules([{ phrases: [wanted], label: wanted, scope, origin: "reader" }]);
+    },
+    [addRules],
+  );
+
+  const removeRule = useCallback((id: string) => {
+    keepRules(storedWithout(ruleStoreRef.current, id));
+  }, [keepRules]);
+
   useEffect(() => {
     const registration = registerTools(
       buildTools({
@@ -252,12 +294,13 @@ export default function App() {
           setScanned((current) =>
             sectionIds.reduce((all, sectionId) => recordScanned(all, open, sectionId), current),
           ),
+        addRules,
       }),
       (call) => setCalls((current) => [call, ...current].slice(0, 25)),
     );
     void registration.ready.then(setRegistration);
     return () => registration.unregister();
-  }, [openArticle]);
+  }, [addRules, openArticle]);
 
   /*
    * Opening the article a shared link names is this page synchronising itself with the network, and
@@ -350,33 +393,6 @@ export default function App() {
    * A rule is the reader's own setting rather than anything about the article, so it is written down
    * as it is made, and the policy is handed whichever rules apply to what is on screen now.
    */
-  const keepRules = useCallback((next: RuleStore) => {
-    window.localStorage.setItem(RULES_KEY, JSON.stringify(next));
-    setRuleStore(next);
-    setPolicy((current) => ({ ...current, rules: rulesFor(next, articleRef.current) }));
-  }, []);
-
-  const addRule = useCallback(
-    (phrase: string, scope: RuleScope) => {
-      const wanted = phrase.trim();
-      if (wanted === "") return;
-      const open = articleRef.current;
-      const store = ruleStoreRef.current;
-      const rule: Rule = {
-        id: nextRuleId(allRules(store)),
-        phrases: [wanted],
-        label: wanted,
-        scope: open ? scope : "all",
-        origin: "reader",
-        at: Date.now(),
-      };
-      keepRules(storedWith(store, open ? articleKey(open.lang, open.title) : null, [rule]));
-    },
-    [keepRules],
-  );
-
-  const removeRule = useCallback((id: string) => keepRules(storedWithout(ruleStoreRef.current, id)), [keepRules]);
-
   /** Every sentence of the article as text, which is what a rule is matched against. */
   const sentenceTexts = useMemo(
     () =>
@@ -795,7 +811,12 @@ function AlwaysHide({
   );
 }
 
-/** One standing rule: what it is called, how far it reaches, and the button that takes it down. */
+/**
+ * One standing rule: what it is called, how far it reaches, and the button that takes it down. The
+ * reader's own phrase is its own label. An agent's rule is shown by the label and the reason it
+ * gave, and its phrases stand behind the same mask a withheld sentence does: "the fate of a main
+ * character" is safe to read, and the phrase that catches it is the thing the reader is avoiding.
+ */
 function RuleRow({
   rule,
   matched,
@@ -805,6 +826,10 @@ function RuleRow({
   matched: number;
   onRemove: (id: string) => void;
 }) {
+  const [showing, setShowing] = useState(false);
+  const phrases = rule.phrases.join(", ");
+  const hide = () => setShowing(false);
+
   return (
     <li className="rounded-lg border border-line bg-surface px-2.5 py-1.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -817,9 +842,36 @@ function RuleRow({
           Remove
         </button>
       </div>
+      {rule.origin === "agent" && <span className="block text-muted">{rule.reason}</span>}
       <span className="block text-muted">
         {rule.scope === "all" ? "all articles" : "this article"} · {sentenceCount(matched)} withheld
       </span>
+      {rule.origin === "agent" &&
+        (showing ? (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={phrases}
+            title="Hide these phrases again"
+            onClick={hide}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              hide();
+            }}
+            className={`mt-1 block break-words ${OPENED}`}
+          >
+            {phrases}
+          </span>
+        ) : (
+          <button
+            onClick={() => setShowing(true)}
+            aria-label="Show the phrases your agent added — they may contain spoilers"
+            className="unspoiled-mask mt-1 rounded bg-mask px-1.5 py-0.5 text-mask-ink hover:bg-mask-hover"
+          >
+            Show phrases
+          </button>
+        ))}
     </li>
   );
 }
@@ -842,7 +894,9 @@ function Decisions({ decisions }: { decisions: Decision[] }) {
             <li key={newestFirst.length - index} className="rounded-lg border border-line bg-surface px-3 py-2">
               <span className="block">{decision.reason}</span>
               <span className="block tabular-nums text-muted">
-                {decision.show.length} shown · {decision.hide.length} hidden
+                {decision.kind === "mask"
+                  ? `${decision.show.length} shown · ${decision.hide.length} hidden`
+                  : `always hides ${decision.label} · ${decision.scope === "all" ? "every article" : "this article"}`}
               </span>
             </li>
           ))}

@@ -1,27 +1,38 @@
 /** Whether a rule follows the reader from article to article, or belongs to the one it was made on. */
 export type RuleScope = "article" | "all";
 
-/**
- * Who added the rule. It decides what the reader is shown: their own phrases are their own words,
- * and an agent's are withheld until asked for, because the phrase an agent picks to hide a spoiler
- * is very often the spoiler.
- */
-export type RuleOrigin = "reader" | "agent";
-
-/**
- * A standing instruction to withhold any sentence carrying one of these phrases. `label` is what
- * the reader is shown for it, and is the only part of an agent's rule that reaches the screen on
- * its own; `reason` is why the agent added it.
- */
-export type Rule = {
-  id: string;
+/** What every rule holds, whoever made it: the phrases to look for and what it is called. */
+type RuleBody = {
   phrases: string[];
   label: string;
   scope: RuleScope;
-  origin: RuleOrigin;
-  reason?: string;
+};
+
+/** The page's own name for a rule, and when it was made. Neither party writes these. */
+type RuleName = {
+  id: string;
   at: number;
 };
+
+/**
+ * A rule before the page has named it: what an agent asks for, and what the reader's own phrase
+ * becomes.
+ *
+ * Who made it decides two things. An agent's rule always says why it was added, because the label
+ * and that reason are all the reader has to judge it by; the reader's own phrase explains itself.
+ * And the reader's phrases are their own words, where an agent's are withheld until asked for,
+ * because the phrase an agent picks to catch a spoiler is very often the spoiler.
+ */
+export type RuleDraft =
+  | (RuleBody & { origin: "reader" })
+  | (RuleBody & { origin: "agent"; reason: string });
+
+/** A standing instruction to withhold any sentence carrying one of its phrases. */
+export type Rule =
+  | (RuleBody & RuleName & { origin: "reader" })
+  | (RuleBody & RuleName & { origin: "agent"; reason: string });
+
+export type RuleOrigin = Rule["origin"];
 
 /**
  * What two pieces of text are compared as. A reader typing a phrase means the thing they typed,
@@ -57,4 +68,12 @@ export function countMatching(rule: Rule, texts: readonly string[]): number {
 export function nextRuleId(existing: readonly Rule[]): string {
   const numbers = existing.map((rule) => Number(/^r(\d+)$/.exec(rule.id)?.[1] ?? 0));
   return `r${Math.max(0, ...numbers) + 1}`;
+}
+
+/** These drafts as rules, each named past the ones already stored and the ones beside it. */
+export function namedRules(drafts: readonly RuleDraft[], existing: readonly Rule[], at: number): Rule[] {
+  return drafts.reduce<Rule[]>(
+    (named, draft) => [...named, { ...draft, id: nextRuleId([...existing, ...named]), at }],
+    [],
+  );
 }

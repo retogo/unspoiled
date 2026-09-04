@@ -1,5 +1,5 @@
 import { strongestCategory, type SpoilerCategory } from "./categories";
-import { matchingRule, type Rule, type RuleOrigin } from "./rules";
+import { matchingRule, type Rule, type RuleOrigin, type RuleScope } from "./rules";
 import type { Article, Section, Sentence } from "./segment";
 import { isLead } from "./segment";
 
@@ -142,12 +142,29 @@ export function assessSentences(section: Section): ReadonlyMap<string, Assessmen
  * doing so. The ids are the sentences the call actually reached, so the reader sees the size of a
  * decision as well as its wording.
  */
-export type Decision = {
+export type MaskDecision = {
+  kind: "mask";
   at: number;
   show: string[];
   hide: string[];
   reason: string;
 };
+
+/**
+ * One rule the agent added, in the words it is willing to have the reader read. The phrases are
+ * not here: the record is on the reader's screen, and the phrase an agent picks to catch a spoiler
+ * is very often the spoiler.
+ */
+export type RuleDecision = {
+  kind: "rule";
+  at: number;
+  label: string;
+  scope: RuleScope;
+  reason: string;
+};
+
+/** Everything the agent has done to this page, in the order it did it. */
+export type Decision = MaskDecision | RuleDecision;
 
 export type Policy = {
   /** 0 withholds nothing; 100 withholds anything carrying the least suspicion. */
@@ -188,6 +205,18 @@ export function maskWith(policy: Policy, show: string[], hide: string[]): Policy
     hidden.add(id);
   }
   return { ...policy, shown, hidden };
+}
+
+/**
+ * The agent's own rules, written into the record the reader reads. A rule the reader made is
+ * theirs and is not a decision made for them, so it is not recorded here.
+ */
+export function ruleDecisions(rules: readonly Rule[], at: number): RuleDecision[] {
+  return rules.flatMap((rule) =>
+    rule.origin === "agent"
+      ? [{ kind: "rule" as const, at, label: rule.label, scope: rule.scope, reason: rule.reason }]
+      : [],
+  );
 }
 
 const HIDDEN_BY_DECISION: Assessment = {

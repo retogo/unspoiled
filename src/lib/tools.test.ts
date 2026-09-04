@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Article, Paragraph } from "./segment";
-import { newPolicy, type Policy } from "./risk";
+import { newPolicy, ruleDecisions, type Policy } from "./risk";
+import { namedRules, type Rule } from "./rules";
 import { buildTools } from "./tools";
 
 function paragraph(id: string, texts: string[]): Paragraph {
@@ -73,6 +74,12 @@ function harness(sensitivity?: number) {
     markScanned: (_article, sectionIds) => {
       for (const id of sectionIds) if (!read.includes(id)) read.push(id);
     },
+    addRules: (drafts) => {
+      const added = namedRules(drafts, policy.rules, 0);
+      const rules = [...policy.rules, ...added];
+      policy = { ...policy, rules, decisions: [...policy.decisions, ...ruleDecisions(added, 0)] };
+      return { added, policy };
+    },
   });
 
   const call = (name: string, input: Record<string, unknown> = {}) => {
@@ -84,6 +91,15 @@ function harness(sensitivity?: number) {
   return {
     tools,
     call,
+    /** The reader typing a phrase into "Always hide", which the tools see as one more rule. */
+    addReaderRule: (phrase: string) => {
+      const added: Rule[] = namedRules(
+        [{ phrases: [phrase], label: phrase, scope: "article", origin: "reader" }],
+        policy.rules,
+        0,
+      );
+      policy = { ...policy, rules: [...policy.rules, ...added] };
+    },
     /** Opening an article is the one asynchronous tool, even when it only describes the open one. */
     outline: async (input: Record<string, unknown> = {}) =>
       (await call("open_article", input)) as unknown as Record<string, never>,
@@ -125,18 +141,19 @@ function sentencesOf(result: Record<string, never>, sectionId: string): ReadSent
 }
 
 describe("the tools the page offers", () => {
-  it("offers four, named for what each one does to the page", () => {
+  it("offers five, named for what each one does to the page", () => {
     expect(harness().tools.map((tool) => tool.name)).toEqual([
       "open_article",
       "read_article_content",
       "apply_mask",
+      "add_rules",
       "get_masking_report",
     ]);
   });
 
   it("tells the agent which call comes next in every description", () => {
     for (const tool of harness().tools) {
-      expect(tool.description).toMatch(/open_article|read_article_content|apply_mask|get_masking_report/);
+      expect(tool.description).toMatch(/open_article|read_article_content|apply_mask|add_rules|get_masking_report/);
     }
   });
 });
@@ -323,6 +340,116 @@ describe("apply_mask", () => {
   });
 });
 
+describe("add_rules", () => {
+  const twist = {
+    phrases: ["Tyler are one man", "one man"],
+    label: "What the reviewers made of the film",
+    reason: "you are watching it tonight",
+  };
+
+  it("withholds every sentence carrying one of the phrases", () => {
+    const { call } = harness();
+    call("add_rules", { rules: [twist] });
+    expect(sentencesOf(call("read_article_content", { section_ids: ["s2"] }), "s2")[0].shown).toBe(false);
+  });
+
+  it("goes on withholding it where the page withholds nothing else", () => {
+    const { call } = harness(0);
+    call("add_rules", { rules: [twist] });
+    expect(sentencesOf(call("read_article_content", { section_ids: ["s2"] }), "s2")[0].shown).toBe(false);
+  });
+
+  it("reports what each rule was named and how far it reached", () => {
+    const result = harness().call("add_rules", { rules: [twist] });
+    expect(result.added).toEqual([
+      { id: "r1", label: "What the reviewers made of the film", scope: "article", matched_sentences: 1 },
+    ]);
+  });
+
+  it("reports the page as the reader now sees it", () => {
+    expect(harness(0).call("add_rules", { rules: [twist] }).sentences).toEqual({ total: 7, shown: 6, hidden: 1 });
+  });
+
+  it("takes a rule that follows the reader to every article", () => {
+    const result = harness().call("add_rules", { rules: [{ ...twist, scope: "all" }] });
+    expect((result.added as unknown as { scope: string }[])[0].scope).toBe("all");
+  });
+
+  it("adds every rule of one call", () => {
+    const result = harness().call("add_rules", {
+      rules: [twist, { phrases: ["support groups"], label: "How the narrator spends his evenings", reason: "you stopped watching there" }],
+    });
+    expect((result.added as unknown as { id: string }[]).map((rule) => rule.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("counts the sentences a rule reached, not the phrases that reached them", () => {
+    const result = harness().call("add_rules", {
+      rules: [{ phrases: ["narrator", "Tyler"], label: "The two men at the centre of it", reason: "you are watching it tonight" }],
+    });
+    expect((result.added as unknown as { matched_sentences: number }[])[0].matched_sentences).toBe(2);
+  });
+
+  it("refuses a call that names no rules", () => {
+    expect(() => harness().call("add_rules", { rules: [] })).toThrow(/rule/);
+  });
+
+  it("refuses a rule with no phrase to look for", () => {
+    expect(() => harness().call("add_rules", { rules: [{ ...twist, phrases: [] }] })).toThrow(/phrase/);
+    expect(() => harness().call("add_rules", { rules: [{ ...twist, phrases: ["  "] }] })).toThrow(/phrase/);
+  });
+
+  it("refuses a rule with no label, because the reader would be shown nothing", () => {
+    expect(() => harness().call("add_rules", { rules: [{ ...twist, label: "   " }] })).toThrow(/label/);
+  });
+
+  it("refuses a label that repeats one of the phrases, which would spoil what it hides", () => {
+    expect(() =>
+      harness().call("add_rules", { rules: [{ ...twist, label: "The narrator and Tyler are one man" }] }),
+    ).toThrow(/label/);
+  });
+
+  it("refuses a label that repeats a phrase in another case or width", () => {
+    expect(() =>
+      harness().call("add_rules", { rules: [{ phrases: ["Tyler"], label: "Who ＴＹＬＥＲ is", reason: "you are watching it tonight" }] }),
+    ).toThrow(/label/);
+  });
+
+  it("refuses a rule with no reason, which is what the reader is owed", () => {
+    expect(() => harness().call("add_rules", { rules: [{ ...twist, reason: "  " }] })).toThrow(/reason/);
+  });
+
+  it("adds nothing at all when one rule of a call is refused", () => {
+    const { call, policy } = harness();
+    expect(() => call("add_rules", { rules: [twist, { ...twist, label: "" }] })).toThrow(/label/);
+    expect(policy().rules).toEqual([]);
+  });
+
+  it("records the rule where the reader reads what their agent did", () => {
+    const { call, policy } = harness();
+    call("add_rules", { rules: [twist] });
+    expect(policy().decisions).toEqual([
+      {
+        kind: "rule",
+        at: 0,
+        label: "What the reviewers made of the film",
+        scope: "article",
+        reason: "you are watching it tonight",
+      },
+    ]);
+  });
+
+  it("counts a rule's sentences in the outline it hands back", async () => {
+    const { call, outline: describe } = harness(0);
+    call("add_rules", { rules: [twist] });
+    expect(sectionOf(await describe(), "s2").withheld).toBe(1);
+  });
+
+  it("keeps the phrases out of what the reader is shown of the call", () => {
+    const tool = harness().tools.find((candidate) => candidate.name === "add_rules");
+    expect(tool?.summariseInput?.({ rules: [twist] })).not.toContain("one man");
+  });
+});
+
 describe("get_masking_report", () => {
   it("counts every sentence of the article as shown or withheld", () => {
     expect(harness().call("get_masking_report").sentences).toEqual({ total: 7, shown: 3, hidden: 4 });
@@ -352,5 +479,29 @@ describe("get_masking_report", () => {
     call("read_article_content");
     call("apply_mask", { hide: { sentence_ids: ["p3.0"] }, reason: "you asked not to know the twist" });
     expect(JSON.stringify(call("get_masking_report"))).not.toContain("Tyler");
+  });
+
+  it("lists every standing rule by its label and how far it reaches", () => {
+    const { call } = harness();
+    call("add_rules", {
+      rules: [{ phrases: ["Tyler"], label: "The other man in it", reason: "you are watching it tonight" }],
+    });
+    expect(call("get_masking_report").rules).toEqual([
+      { id: "r1", label: "The other man in it", scope: "article", origin: "agent", matched_sentences: 1 },
+    ]);
+  });
+
+  it("leaves a rule's phrases out of the report, so it can be read out too", () => {
+    const { call } = harness();
+    call("add_rules", {
+      rules: [{ phrases: ["Tyler"], label: "The other man in it", reason: "you are watching it tonight" }],
+    });
+    expect(JSON.stringify(call("get_masking_report"))).not.toContain("Tyler");
+  });
+
+  it("lists the rules the reader made themselves", () => {
+    const { call, addReaderRule } = harness();
+    addReaderRule("basement");
+    expect(call("get_masking_report").rules).toMatchObject([{ label: "basement", origin: "reader" }]);
   });
 });

@@ -290,20 +290,27 @@ describe("what overrides what", () => {
 describe("a rule the reader or their agent added", () => {
   const meta = section("Production", ["The film was shot on location over eleven weeks."]);
 
-  function withRule(sensitivity: number, overrides: Partial<Rule> = {}): Policy {
-    return at(sensitivity, {
-      rules: [
-        {
-          id: "r1",
-          phrases: ["eleven weeks"],
-          label: "eleven weeks",
-          scope: "article",
-          origin: "reader",
-          at: 0,
-          ...overrides,
-        },
-      ],
-    });
+  const readersRule: Rule = {
+    id: "r1",
+    phrases: ["eleven weeks"],
+    label: "eleven weeks",
+    scope: "article",
+    origin: "reader",
+    at: 0,
+  };
+
+  const agentsRule: Rule = {
+    id: "r2",
+    phrases: ["eleven weeks"],
+    label: "How long the shoot ran",
+    scope: "article",
+    origin: "agent",
+    reason: "you asked not to know how it was made",
+    at: 0,
+  };
+
+  function withRule(sensitivity: number, rule: Rule = readersRule): Policy {
+    return at(sensitivity, { rules: [rule] });
   }
 
   it("withholds a sentence the wording rules found nothing wrong with", () => {
@@ -321,7 +328,7 @@ describe("a rule the reader or their agent added", () => {
   });
 
   it("says when the rule was one the agent added", () => {
-    const policy = withRule(65, { origin: "agent", label: "How long the shoot ran" });
+    const policy = withRule(65, agentsRule);
     expect(hiddenSentenceReason(firstSentence(meta), meta, policy)?.reason).toBe(
       "matches a rule your agent added",
     );

@@ -1,15 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { countMatching, fold, matchingRule, nextRuleId, type Rule } from "./rules";
+import { countMatching, fold, matchingRule, nextRuleId, type Rule, type RuleScope } from "./rules";
 
-function rule(phrases: string[], overrides: Partial<Rule> = {}): Rule {
+function rule(phrases: string[], overrides: { id?: string; scope?: RuleScope } = {}): Rule {
+  return { id: "r1", phrases, label: phrases[0], scope: "article", origin: "reader", at: 0, ...overrides };
+}
+
+function agentRule(phrases: string[], id: string): Rule {
   return {
-    id: "r1",
+    id,
     phrases,
-    label: phrases[0],
+    label: "What the agent took down",
     scope: "article",
-    origin: "reader",
+    origin: "agent",
+    reason: "you are watching it tonight",
     at: 0,
-    ...overrides,
   };
 }
 
@@ -45,8 +49,7 @@ describe("a phrase the reader asked to hide", () => {
 
   it("reports which rule matched, so the reader is told whose it was", () => {
     const readers = rule(["Tyler"], { id: "r1" });
-    const agents = rule(["ghost"], { id: "r2", origin: "agent" });
-    expect(matchingRule(SENTENCE, [readers, agents])?.id).toBe("r2");
+    expect(matchingRule(SENTENCE, [readers, agentRule(["ghost"], "r2")])?.id).toBe("r2");
   });
 
   it("never matches on a phrase that is only spaces", () => {

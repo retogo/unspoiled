@@ -50,7 +50,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Reflect.deleteProperty(document, "modelContext");
+});
 
 async function open(title: string) {
   history.replaceState(null, "", `?lang=en&title=${encodeURIComponent(title)}`);
@@ -187,6 +190,110 @@ describe("where a phrase applies", () => {
 
     expect(screen.queryByRole("button", { name: "This article only" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Every article" })).toBeNull();
+  });
+});
+
+type WebMcpTool = {
+  name: string;
+  execute: (raw: unknown) => Promise<{ content: { type: string; text: string }[] }>;
+};
+
+function installAgent(): WebMcpTool[] {
+  const registered: WebMcpTool[] = [];
+  Object.defineProperty(document, "modelContext", {
+    value: { registerTool: (tool: WebMcpTool) => Promise.resolve(registered.push(tool)) },
+    configurable: true,
+    writable: true,
+  });
+  return registered;
+}
+
+async function openWithAgent(title: string): Promise<WebMcpTool[]> {
+  const registered = installAgent();
+  await open(title);
+  await waitFor(() => expect(registered.length).toBeGreaterThan(0));
+  return registered;
+}
+
+async function callTool(registered: WebMcpTool[], name: string, input: Record<string, unknown>) {
+  const tool = registered.find((candidate) => candidate.name === name);
+  if (!tool) throw new Error(`Tool not registered: ${name}`);
+  await act(async () => {
+    await tool.execute(JSON.stringify(input));
+  });
+}
+
+const AGENTS_RULE = {
+  phrases: ["studio"],
+  label: "How the film came to be made",
+  reason: "you said you want to watch it cold",
+};
+
+describe("a rule the reader's agent added", () => {
+  it("withholds the sentences it reaches", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    expect(screen.queryByText(PITT)).toBeNull();
+  });
+
+  it("tells the reader what it covers and why, in the agent's own words", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    expect(within(ruleList()).getByText("How the film came to be made")).toBeTruthy();
+    expect(within(ruleList()).getByText("you said you want to watch it cold")).toBeTruthy();
+    expect(within(ruleList()).getByText(/1 sentence withheld/)).toBeTruthy();
+  });
+
+  it("keeps the phrases off the screen until the reader asks for them", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    expect(within(ruleList()).queryByText("studio")).toBeNull();
+  });
+
+  it("keeps the phrases out of the record of the call as well", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    expect(screen.getByText(/How the film came to be made →/)).toBeTruthy();
+    expect(document.body.textContent).not.toContain('"studio"');
+  });
+
+  it("shows them when the reader does ask, and takes them back on a tap", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    await userEvent.click(screen.getByRole("button", { name: /may contain spoilers/ }));
+    expect(within(ruleList()).getByText("studio")).toBeTruthy();
+
+    await userEvent.click(within(ruleList()).getByText("studio"));
+    expect(within(ruleList()).queryByText("studio")).toBeNull();
+  });
+
+  it("is one the reader can take down like their own", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Stop hiding How the film came to be made" }));
+
+    expect(articleText()).toMatch(PITT);
+  });
+
+  it("appears among the decisions the reader can read back", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    const decisions = screen.getByRole("heading", { name: "Your agent's decisions" }).parentElement;
+    expect(decisions?.textContent).toContain("you said you want to watch it cold");
+    expect(decisions?.textContent).toContain("How the film came to be made");
+    expect(decisions?.textContent).not.toContain("studio");
   });
 });
 

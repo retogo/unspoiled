@@ -51,7 +51,9 @@ const usedPolicy: Policy = {
   shown: new Set(["p1.0"]),
   hidden: new Set(["p2.1"]),
   rules: [],
-  decisions: [{ at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" }],
+  decisions: [
+    { kind: "mask", at: 0, show: ["p1.0"], hide: ["p2.1"], reason: "you have watched the first season" },
+  ],
 };
 
 function rule(id: string, phrase: string, scope: RuleScope = "article"): Rule {
