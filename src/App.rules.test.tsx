@@ -434,13 +434,58 @@ describe("the Always hide drawer", () => {
     expect(within(drawer()).queryByText(/Nothing yet/)).toBeNull();
   });
 
-  it("closes again when the reader folds it, and stays closed on the next phrase they type", async () => {
+  it("closes again when the reader folds it away", async () => {
     await open("Fight Club (film)");
     await add("studio");
 
     await userEvent.click(screen.getByText("Always hide · 1"));
 
     expect(drawer().open).toBe(false);
+  });
+
+  /*
+   * Folding the drawer away says the reader is done with the rules they have, not that they want to
+   * be kept from the next one. A rule starts withholding sentences the moment it lands, so the
+   * drawer opens again to show its row, however many times the reader has closed it.
+   */
+  it("opens again for an agent's rule after the reader has folded it away", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+    await userEvent.click(screen.getByText("Always hide · 1"));
+    expect(drawer().open).toBe(false);
+
+    await callTool(registered, "add_rules", {
+      rules: [{ phrases: ["Palahniuk"], label: "Who wrote it", reason: "you asked to meet it cold" }],
+    });
+
+    expect(drawer().open).toBe(true);
+  });
+
+  it("opens again for the reader's own phrase after they have folded it away", async () => {
+    await open("Fight Club (film)");
+    await add("studio");
+    await userEvent.click(screen.getByText("Always hide · 1"));
+    expect(drawer().open).toBe(false);
+
+    await add("Palahniuk");
+
+    expect(drawer().open).toBe(true);
+  });
+
+  it("opens again every time, not just the once", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    const rules = [
+      { phrases: ["Palahniuk"], label: "Who wrote it", reason: "you asked to meet it cold" },
+      { phrases: ["Los Angeles"], label: "Where it was filmed", reason: "you asked to meet it cold" },
+      { phrases: ["Fox 2000"], label: "Who paid for it", reason: "you asked to meet it cold" },
+    ];
+    for (const rule of rules) {
+      await callTool(registered, "add_rules", { rules: [rule] });
+      expect(drawer().open).toBe(true);
+      await userEvent.click(screen.getByText(/^Always hide · /));
+      expect(drawer().open).toBe(false);
+    }
   });
 });
 
