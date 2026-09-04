@@ -138,16 +138,26 @@ export function assessSentences(section: Section): ReadonlyMap<string, Assessmen
 }
 
 /**
+ * What every decision carries, whichever tool made it: when it was made, why, and the article it
+ * was made on. The log outlives the article, and the ids and counts in it do not, so a decision
+ * the reader scrolls back to is named with the article it belongs to.
+ */
+type DecisionMade = {
+  at: number;
+  articleKey: string;
+  articleTitle: string;
+  reason: string;
+};
+
+/**
  * One call of `apply_mask`: what it opened, what it closed, and the reason the agent gave for
  * doing so. The ids are the sentences the call actually reached, so the reader sees the size of a
  * decision as well as its wording.
  */
-export type MaskDecision = {
+export type MaskDecision = DecisionMade & {
   kind: "mask";
-  at: number;
   show: string[];
   hide: string[];
-  reason: string;
 };
 
 /**
@@ -155,12 +165,10 @@ export type MaskDecision = {
  * not here: the record is on the reader's screen, and the phrase an agent picks to catch a spoiler
  * is very often the spoiler.
  */
-export type RuleDecision = {
+export type RuleDecision = DecisionMade & {
   kind: "rule";
-  at: number;
   label: string;
   scope: RuleScope;
-  reason: string;
 };
 
 /** Everything the agent has done to this page, in the order it did it. */
@@ -209,12 +217,17 @@ export function maskWith(policy: Policy, show: string[], hide: string[]): Policy
 
 /**
  * The agent's own rules, written into the record the reader reads. A rule the reader made is
- * theirs and is not a decision made for them, so it is not recorded here.
+ * theirs and is not a decision made for them, so it is not recorded here. An agent can only add a
+ * rule with an article open, which is the article the record names it against.
  */
-export function ruleDecisions(rules: readonly Rule[], at: number): RuleDecision[] {
+export function ruleDecisions(
+  rules: readonly Rule[],
+  at: number,
+  on: { articleKey: string; articleTitle: string },
+): RuleDecision[] {
   return rules.flatMap((rule) =>
     rule.origin === "agent"
-      ? [{ kind: "rule" as const, at, label: rule.label, scope: rule.scope, reason: rule.reason }]
+      ? [{ kind: "rule" as const, at, ...on, label: rule.label, scope: rule.scope, reason: rule.reason }]
       : [],
   );
 }

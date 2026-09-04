@@ -62,6 +62,20 @@ describe("a tool whose handler returns", () => {
 });
 
 describe("the record of a call", () => {
+  it("shows a tool's own summary of its arguments, where the arguments would give the article away", async () => {
+    const { registered, calls } = await installAgent([
+      {
+        ...tool("add_rules", () => ({ added: 2 })),
+        summariseInput: (input) => `${(input.rules as unknown[]).length} rules`,
+      },
+    ]);
+
+    await registered[0].execute(JSON.stringify({ rules: [{ phrases: ["the killer"] }, { phrases: ["her father"] }] }));
+
+    expect(calls[0].input).toBe("2 rules");
+    expect(calls[0].input).not.toMatch(/killer|father/);
+  });
+
   it("marks a call that failed", async () => {
     const { registered, calls } = await installAgent([
       tool("get_section", () => {

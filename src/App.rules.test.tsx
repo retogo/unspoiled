@@ -290,7 +290,7 @@ describe("a rule the reader's agent added", () => {
 
     await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
 
-    const decisions = screen.getByRole("heading", { name: "Your agent's decisions" }).parentElement;
+    const decisions = screen.getByRole("heading", { name: "Decisions" }).parentElement;
     expect(decisions?.textContent).toContain("you said you want to watch it cold");
     expect(decisions?.textContent).toContain("How the film came to be made");
     expect(decisions?.textContent).not.toContain("studio");

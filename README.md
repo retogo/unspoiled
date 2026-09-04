@@ -34,11 +34,12 @@ the agent stays around.
 
 Reading the ending is the job, not the failure. What the page holds the agent to is narrower and
 checkable: **every decision is enforced on the page and displayed to you with the reason given for
-it.** The sections your agent read are listed for the rest of the session. Every call of
-`apply_mask` appears under "Your agent's decisions" in the reader's own words, with the count of
-what it opened and closed — a call that reached nothing included, as "0 shown · 0 hidden" — and any
-sentence it opened is listed under "Revealed on your page". An agent that quietly hides half an
-article has to say so on your screen, and a sentence you disagree about is one tap from coming back.
+it.** The sections your agent has read are named in front of the article for as long as it is open,
+because knowing the ending is not something it can undo. Every call of `apply_mask` says itself as
+it lands — what it showed, what it hid, and why, in the reader's own words — and is kept under
+"Agent activity" beneath the article, a call that reached nothing included, as "0 shown · 0 hidden".
+An agent that quietly hides half an article has to say so on your screen, and a sentence you
+disagree about is one tap from coming back.
 
 **The page works with no agent attached.** A wording heuristic scores every sentence for how much
 of the ending it gives away, and one slider decides how much of that you see. That is the safety
@@ -69,6 +70,12 @@ knows you thinks. So an agent can open the first two paragraphs of a plot for a 
 watching there, and it can take down "his mother is eaten by a Titan" — a sentence with no
 giveaway words in it at all, which the wording rules were never going to catch.
 
+Readers can also add literal exclusion words and phrases that remain active across articles. An
+agent can add the same kind of persistent rule with `add_rules` after it has read an article and
+noticed a recurring name or event. Because the wording of an agent rule may itself be a spoiler,
+the page keeps it redacted until the reader explicitly asks to reveal it; tool results, masking
+reports and the activity log expose only the number of agent rules.
+
 ## Tools
 
 | Tool | What it does |
@@ -76,7 +83,8 @@ giveaway words in it at all, which the wording rules were never going to catch.
 | `open_article` | Open a Wikipedia article by title, in English or Japanese, or describe the one already open: sections, headings, sentence counts and how many are withheld right now. No article text |
 | `read_article_content` | Read the article in full, spoilers included, every sentence under an id and flagged with whether the reader can currently see it |
 | `apply_mask` | Show and hide sections, paragraphs or sentences, with the reason. Beats the slider in both directions; hiding beats showing. Every call is displayed on the reader's screen, and reports what it matched and which ids named nothing |
-| `get_masking_report` | Audit: sensitivity, how many sentences are shown and hidden, every decision and its reason, and which sections the agent has read. No article text |
+| `add_rules` | Add persistent literal exclusion words or phrases. Agent-added wording stays redacted because the rule itself may reveal the spoiler |
+| `get_masking_report` | Audit: sensitivity, rule counts, how many sentences are shown and hidden, every decision and its reason, and which sections the agent has read. No article text |
 
 ## Running it
 

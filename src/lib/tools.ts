@@ -1,6 +1,7 @@
 import { sectionHeading, sectionHeadingPath, type Article, type Paragraph, type Section } from "./segment";
-import { assessSection, hiddenSentence, maskWith, type Policy } from "./risk";
+import { assessSection, hiddenSentence, maskWith, type Decision, type Policy } from "./risk";
 import { countMatching, fold, type Rule, type RuleDraft, type RuleScope } from "./rules";
+import { articleKey } from "./session";
 import type { ToolDefinition } from "./webmcp";
 import type { Lang } from "./wikipedia";
 
@@ -173,6 +174,37 @@ function asDraft(request: unknown): RuleDraft {
   };
 }
 
+/**
+ * A decision as the report gives it, which is a decision minus the article it names. `Omit` over a
+ * union would keep only the fields both kinds share, so the two kinds are narrowed one at a time.
+ */
+type ReportedDecision = Decision extends infer D
+  ? D extends Decision
+    ? Omit<D, "articleKey" | "articleTitle">
+    : never
+  : never;
+
+/**
+ * The decisions that shaped the article the reader has open. The log itself spans the session, but
+ * a report of this page would mislead by listing decisions whose ids belong to another article; the
+ * article each one was made on is dropped with them, since every row that is left names this one.
+ */
+function decisionsOn(policy: Policy, key: string): ReportedDecision[] {
+  return policy.decisions
+    .filter((decision) => decision.articleKey === key)
+    .map((decision) =>
+      decision.kind === "mask"
+        ? { kind: decision.kind, at: decision.at, show: decision.show, hide: decision.hide, reason: decision.reason }
+        : {
+            kind: decision.kind,
+            at: decision.at,
+            label: decision.label,
+            scope: decision.scope,
+            reason: decision.reason,
+          },
+    );
+}
+
 function countSentences(article: Article, policy: Policy) {
   let total = 0;
   let hidden = 0;
@@ -288,7 +320,18 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
            cannot see is a decision they cannot disagree with. */
         const next: Policy = {
           ...masked,
-          decisions: [...policy.decisions, { kind: "mask", at: Date.now(), show, hide, reason }],
+          decisions: [
+            ...policy.decisions,
+            {
+              kind: "mask",
+              at: Date.now(),
+              articleKey: articleKey(article.lang, article.title),
+              articleTitle: article.displayTitle,
+              show,
+              hide,
+              reason,
+            },
+          ],
         };
         context.setPolicy(next);
         return {
@@ -380,7 +423,7 @@ export function buildTools(context: ToolContext): ToolDefinition[] {
             origin: rule.origin,
             matched_sentences: countMatching(rule, texts),
           })),
-          decisions: policy.decisions,
+          decisions: decisionsOn(policy, articleKey(article.lang, article.title)),
           sections_read: context.scanned(),
         };
       },
