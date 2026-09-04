@@ -620,6 +620,13 @@ export default function App() {
     });
   }, [flowSource, policy.shown]);
 
+  const registrationLine =
+    registration.api === "unavailable"
+      ? "No agent connected — reading on your own"
+      : registration.error
+        ? `This page could not expose its tools — ${registration.error}`
+        : `${registration.toolCount} tools exposed via ${registration.api}`;
+
   return (
     <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
       {/*
@@ -634,10 +641,16 @@ export default function App() {
           <div className="order-last w-full lg:order-none lg:w-auto lg:flex-1">
             <SearchBox lang={lang} onLang={setLang} onOpen={(title) => void openArticle(lang, title)} />
           </div>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex min-w-0 items-center gap-2">
             <ThemeToggle theme={theme} onChoose={chooseTheme} />
+            {/*
+              The badge is the longest thing on the line and the least urgent, so on a narrow screen
+              it is what gives: capped and cut short so the logo and the theme keep their line, with
+              the whole of it a press away. Given room, it says itself in full.
+            */}
             <span
-              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+              title={registrationLine}
+              className={`max-w-40 truncate rounded-full px-2.5 py-1 text-xs font-medium lg:max-w-none ${
                 registration.api === "unavailable"
                   ? "bg-raised text-muted"
                   : registration.error
@@ -645,11 +658,7 @@ export default function App() {
                     : "bg-ok-surface text-ok-ink"
               }`}
             >
-              {registration.api === "unavailable"
-                ? "No agent connected — reading on your own"
-                : registration.error
-                  ? `This page could not expose its tools — ${registration.error}`
-                  : `${registration.toolCount} tools exposed via ${registration.api}`}
+              {registrationLine}
             </span>
           </div>
         </div>
