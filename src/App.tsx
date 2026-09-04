@@ -622,26 +622,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-paper pb-24 text-ink lg:pb-0">
-      <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-4">
+      {/*
+        The search field is how the reader gets anywhere on this page, so it sits in the header
+        rather than at the top of the column, in the same place whether or not an article is open.
+        The header is positioned so that the suggestions the field drops come down over the article
+        rather than under it. Below `lg` the field takes a line of its own beneath the rest.
+      */}
+      <header className="relative z-30 border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2 px-5 py-3">
           <h1 className="text-xl font-semibold tracking-tight">Unspoiled</h1>
-          <p className="text-sm text-muted">Read Wikipedia without learning the ending.</p>
-          <span
-            className={`ml-auto rounded-full px-2.5 py-1 text-xs font-medium ${
-              registration.api === "unavailable"
-                ? "bg-raised text-muted"
+          <div className="order-last w-full lg:order-none lg:w-auto lg:flex-1">
+            <SearchBox lang={lang} onLang={setLang} onOpen={(title) => void openArticle(lang, title)} />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle theme={theme} onChoose={chooseTheme} />
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                registration.api === "unavailable"
+                  ? "bg-raised text-muted"
+                  : registration.error
+                    ? "bg-warn-surface text-warn-ink"
+                    : "bg-ok-surface text-ok-ink"
+              }`}
+            >
+              {registration.api === "unavailable"
+                ? "No agent connected — reading on your own"
                 : registration.error
-                  ? "bg-warn-surface text-warn-ink"
-                  : "bg-ok-surface text-ok-ink"
-            }`}
-          >
-            {registration.api === "unavailable"
-              ? "No agent connected — reading on your own"
-              : registration.error
-                ? `This page could not expose its tools — ${registration.error}`
-                : `${registration.toolCount} tools exposed via ${registration.api}`}
-          </span>
-          <ThemeToggle theme={theme} onChoose={chooseTheme} />
+                  ? `This page could not expose its tools — ${registration.error}`
+                  : `${registration.toolCount} tools exposed via ${registration.api}`}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -728,21 +738,23 @@ export default function App() {
         </aside>
 
         <div className="min-w-0">
-          <SearchBox lang={lang} onLang={setLang} onOpen={(title) => void openArticle(lang, title)} />
-
+          {/* What the page is for, and where to start, for a reader who has nothing open yet. */}
           {!article && !loading && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {DEMO_ARTICLES.map((demo) => (
-                <button
-                  key={`${demo.lang}:${demo.title}`}
-                  onClick={() => void openArticle(demo.lang, demo.title)}
-                  className="rounded-lg border border-edge bg-surface px-3 py-2 text-left text-sm hover:border-edge-hover"
-                >
-                  <span className="font-medium">{demo.title}</span>
-                  <span className="block text-xs text-muted">{demo.note}</span>
-                </button>
-              ))}
-            </div>
+            <>
+              <p className="text-sm text-muted">Read Wikipedia without learning the ending.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {DEMO_ARTICLES.map((demo) => (
+                  <button
+                    key={`${demo.lang}:${demo.title}`}
+                    onClick={() => void openArticle(demo.lang, demo.title)}
+                    className="rounded-lg border border-edge bg-surface px-3 py-2 text-left text-sm hover:border-edge-hover"
+                  >
+                    <span className="font-medium">{demo.title}</span>
+                    <span className="block text-xs text-muted">{demo.note}</span>
+                  </button>
+                ))}
+              </div>
+            </>
           )}
 
           {loading && <ArticleSkeleton />}

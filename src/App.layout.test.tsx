@@ -85,6 +85,34 @@ describe("where the page puts each thing it has to say", () => {
     }
   });
 
+  /*
+   * The search field is how the reader gets anywhere, so it belongs to the page rather than to the
+   * column under it: in the header it is in the same place whether or not an article is open.
+   */
+  it("keeps the search field in the header, above everything the page shows", async () => {
+    await openArticle();
+
+    const field = screen.getByPlaceholderText("Search Wikipedia for a film, series or novel");
+
+    expect(field.closest("header")).toBeTruthy();
+    expect(precedes(screen.getByRole("banner"), screen.getByRole("main"))).toBe(true);
+  });
+
+  it("drops the strapline once there is an article to read instead", async () => {
+    await openArticle();
+
+    expect(screen.queryByText("Read Wikipedia without learning the ending.")).toBeNull();
+  });
+
+  it("says what the page is for while there is no article yet", () => {
+    render(<App />);
+
+    const strapline = screen.getByText("Read Wikipedia without learning the ending.");
+
+    expect(strapline.closest("header")).toBeNull();
+    expect(precedes(screen.getByRole("banner"), strapline)).toBe(true);
+  });
+
   it("puts what the agent has read in front of the article and its workings after it", async () => {
     const call = await openArticle();
     await call("read_article_content", { section_ids: ["s1"] });
