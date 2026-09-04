@@ -22,6 +22,11 @@ function section(heading: string, texts: string[] = ["The film was shot on locat
   };
 }
 
+/** A subsection, which is where a television article puts its seasons. */
+function under(path: string[], texts: string[] = ["The film was shot on location over eleven weeks."]): Section {
+  return { ...section(path[path.length - 1], texts), headingPath: path, level: path.length + 1 };
+}
+
 function firstSentence(target: Section) {
   return target.paragraphs[0].sentences[0];
 }
@@ -80,6 +85,28 @@ describe("section headings", () => {
 
   it.each(["Production", "Release", "Box office", "受賞"])("vouches for %s as safe", (heading) => {
     expect(assessSection(section(heading))).toMatchObject({ level: "safe", risk: 0 });
+  });
+
+  /*
+   * A television article often has no "Plot": the seasons hang under "Series overview" and each one
+   * recounts a season from beginning to end. The heading that carries the narrative is the ancestor,
+   * so it is the ancestor that has to be recognised — "Season 4" on its own says nothing about what
+   * is under it, and appears just as often under a heading the page vouches for.
+   */
+  it("reads a series overview as narrative", () => {
+    expect(assessSection(section("Series overview")).level).toBe("spoiler");
+  });
+
+  it("reads a season under a series overview as narrative", () => {
+    expect(assessSection(under(["Series overview", "Season 1"])).level).toBe("spoiler");
+  });
+
+  it.each([
+    ["Reception and impact", "Critical reception", "Season 1"],
+    ["Cast and characters", "Seasons 1 and 2"],
+    ["Home media", "Season 4 (2011)"],
+  ])("does not read a season under %s as narrative", (...path) => {
+    expect(assessSection(under(path)).level).not.toBe("spoiler");
   });
 
   it("holds back a section it can neither read as narrative nor vouch for", () => {

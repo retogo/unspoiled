@@ -46,8 +46,14 @@ function headingRule(alternatives: string): RegExp {
   return new RegExp(`^(?:${alternatives})(?:一覧)?${HEADING_TAIL}`, "i");
 }
 
+/*
+ * `series overview` earns its place because a television article often has no "Plot" at all: the
+ * seasons hang under it and each one recounts a season to its end. It is the ancestor that is
+ * matched, never the season heading itself — "Season 4" says nothing about what is under it, and
+ * turns up just as often under "Critical reception" and "Home media", which the page vouches for.
+ */
 const NARRATIVE_SECTIONS = headingRule(
-  "plot|plot summary|synopsis|story|storyline|summary|ending|endings|episodes?|episode list|list of episodes|characters?|character list|あらすじ|ストーリー|物語|各話|各話あらすじ|エピソード|結末|登場人物",
+  "plot|plot summary|synopsis|story|storyline|summary|series overview|ending|endings|episodes?|episode list|list of episodes|characters?|character list|あらすじ|ストーリー|物語|各話|各話あらすじ|エピソード|結末|登場人物",
 );
 
 const ANALYSIS_SECTIONS = headingRule(
