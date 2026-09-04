@@ -51,18 +51,33 @@ exposes semantic operations over its own local state — this sentence, that par
 section, what is on screen right now — with no server integration and no screen-coordinate
 automation.
 
-## One dial, not three settings
+## One dial, and what it is a dial over
 
 How much the page withholds on its own is a number from 0 to 100, on a slider. Every sentence is
-scored for how much of the ending it gives away, and a sentence is withheld when its score is
-above 100 minus that number. Three points on the scale are marked, because they are the ones worth
-a name: 0 withholds nothing, 50 withholds plot summaries and the sentences that state a reveal
-outright, 75 withholds wording that merely hints at the ending as well.
+scored for how much of the ending it gives away, and a sentence is withheld when its score is above
+100 minus that number. Five points on the scale are marked, and each one is named for what it takes
+off the screen rather than for how strict it is:
 
-The scoring is what makes the dial worth turning. A plot summary runs in the order the story does,
-so a sentence is scored by how far into the section it sits — the opening scene is the safest thing
-in it and the last sentence is the ending. Lowering the slider therefore opens a plot from its
-beginning, one sentence at a time, instead of unmasking it at random.
+| | Preset | What it hides |
+| --- | --- | --- |
+| 0 | Show everything | Nothing on the page's own account. Your agent's decisions and your rules still apply |
+| 20 | Ending only | The final scene, who dies, who did it |
+| 45 | Major spoilers | Endings, deaths, identities, winners and major reveals |
+| 65 | Spoiler-safe | Whole plot summaries, analysis, and wording that hints at the ending. The default |
+| 100 | Maximum protection | Anything the page finds even slightly suspicious |
+
+What the names divide is a score, and the score comes from two things. A sentence's wording is
+matched against seven kinds of spoiler — death, identity, outcome, return, relationship, ending and
+hint — and each kind carries its own weight, so being told who dies costs more than a sentence that
+merely leans towards the ending. Naming the kinds is what lets one number mean something: the
+reader is not choosing a strictness, they are choosing how far down that list they want to be
+protected.
+
+The other half is position. A plot summary runs in the order the story does, so a sentence is also
+scored by how far into the section it sits — the opening scene is the safest thing in it and the
+last sentence is the ending. A sentence is worth whichever of the two gives more away. Lowering the
+slider therefore opens a plot from its beginning, one sentence at a time, instead of unmasking it
+at random, while a death in a production section is still withheld.
 
 Your agent's decisions outrank the dial in both directions, and hiding outranks showing. The
 slider is what the page thinks; `apply_mask` is what someone who has actually read the article and
@@ -70,11 +85,20 @@ knows you thinks. So an agent can open the first two paragraphs of a plot for a 
 watching there, and it can take down "his mother is eaten by a Titan" — a sentence with no
 giveaway words in it at all, which the wording rules were never going to catch.
 
-Readers can also add literal exclusion words and phrases that remain active across articles. An
-agent can add the same kind of persistent rule with `add_rules` after it has read an article and
-noticed a recurring name or event. Because the wording of an agent rule may itself be a spoiler,
-the page keeps it redacted until the reader explicitly asks to reveal it; tool results, masking
-reports and the activity log expose only the number of agent rules.
+## Always hide
+
+Under the slider is the reader's other control: phrases the page withholds wherever they appear, at
+every sensitivity, including the one that withholds nothing else. A rule is a phrase rather than a
+sentence id, so it survives the article changing — `This article only` keeps it to the article it
+was made on, `Every article` carries it wherever the reader goes next.
+
+An agent adds one with `add_rules`, and this is the one thing it hands the page that the page then
+shows the reader in the agent's own words. So the reader sees the rule's label, its scope, its
+reason and how many sentences of the article in front of them it reached — all of it, without
+opening anything. The phrases are the exception: the phrase an agent picks to catch a spoiler is
+very often the spoiler, so they stand behind the same mask a withheld sentence does, under
+`Show phrases`. A label that repeats one of its own phrases fails the call, because it would print
+the spoiler above the mask.
 
 ## Tools
 
@@ -83,8 +107,8 @@ reports and the activity log expose only the number of agent rules.
 | `open_article` | Open a Wikipedia article by title, in English or Japanese, or describe the one already open: sections, headings, sentence counts and how many are withheld right now. No article text |
 | `read_article_content` | Read the article in full, spoilers included, every sentence under an id and flagged with whether the reader can currently see it |
 | `apply_mask` | Show and hide sections, paragraphs or sentences, with the reason. Beats the slider in both directions; hiding beats showing. Every call is displayed on the reader's screen, and reports what it matched and which ids named nothing |
-| `add_rules` | Add persistent literal exclusion words or phrases. Agent-added wording stays redacted because the rule itself may reveal the spoiler |
-| `get_masking_report` | Audit: sensitivity, rule counts, how many sentences are shown and hidden, every decision and its reason, and which sections the agent has read. No article text |
+| `add_rules` | Add standing rules that withhold every sentence carrying one of their phrases, on this article or on all of them. The reader sees the label, scope, reason and match count; the phrases stay behind `Show phrases`, and a label that repeats one of them fails the call |
+| `get_masking_report` | Audit: sensitivity, how many sentences are shown and hidden, every standing rule by its label and how far it reaches, every decision and its reason, and which sections the agent has read. No article text and no rule phrases |
 
 ## Running it
 
