@@ -215,6 +215,7 @@ export default function App() {
   const [ruleStore, setRuleStore] = useState<RuleStore>(() =>
     readRuleStore(window.localStorage.getItem(RULES_KEY)),
   );
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [notice, setNotice] = useState<Decision | null>(null);
   const [reading, setReading] = useState(false);
 
@@ -284,6 +285,10 @@ export default function App() {
   const keepRules = useCallback((next: RuleStore, added: readonly Rule[] = []): Policy => {
     window.localStorage.setItem(RULES_KEY, JSON.stringify(next));
     setRuleStore(next);
+    /* A rule starts withholding sentences the moment it lands, so adding one opens the drawer that
+       shows its row: a rule the reader cannot see is a rule filtering silently. Taking one down
+       does not, and neither does anything else. */
+    if (added.length > 0) setRulesOpen(true);
     const open = articleRef.current;
     const recorded = open
       ? ruleDecisions(added, Date.now(), {
@@ -661,19 +666,19 @@ export default function App() {
 
           {/*
             The reader's second control, and the only place an agent's rule is ever named. It sits
-            open beside the slider rather than folded away: a standing rule withholds sentences at
-            every sensitivity, so what it is called and how far it reaches has to be readable
-            without asking. Only the phrases are behind a mask.
+            under the slider, folded until there is something in it: a standing rule withholds at
+            every sensitivity, so the drawer opens itself whenever one lands. Only phrases are
+            behind a mask.
           */}
-          <section>
-            <AlwaysHide
-              rules={policy.rules}
-              scoped={article !== null}
-              matched={(rule) => countMatching(rule, sentenceTexts)}
-              onAdd={addRule}
-              onRemove={removeRule}
-            />
-          </section>
+          <AlwaysHide
+            rules={policy.rules}
+            scoped={article !== null}
+            matched={(rule) => countMatching(rule, sentenceTexts)}
+            open={rulesOpen}
+            onOpen={setRulesOpen}
+            onAdd={addRule}
+            onRemove={removeRule}
+          />
         </aside>
 
         <div className="min-w-0">
@@ -824,12 +829,21 @@ function AlwaysHide({
   rules,
   scoped,
   matched,
+  open,
+  onOpen,
   onAdd,
   onRemove,
 }: {
   rules: Rule[];
   scoped: boolean;
   matched: (rule: Rule) => number;
+  /**
+   * Whether the drawer stands open. It is the page's rather than this component's, because what
+   * opens it is a rule landing, and a rule can land from the agent while the reader is elsewhere.
+   * Folding it away again is theirs, and is not remembered past the session.
+   */
+  open: boolean;
+  onOpen: (open: boolean) => void;
   onAdd: (phrase: string, scope: RuleScope) => void;
   onRemove: (id: string) => void;
 }) {
@@ -837,8 +851,14 @@ function AlwaysHide({
   const [scope, setScope] = useState<RuleScope>("article");
 
   return (
-    <section>
-      <h3 className="font-semibold">Always hide</h3>
+    <details
+      open={open}
+      onToggle={(event) => onOpen(event.currentTarget.open)}
+      className="rounded-lg border border-line bg-surface px-3 py-2"
+    >
+      <summary className="cursor-pointer font-semibold">
+        {rules.length > 0 ? `Always hide · ${rules.length}` : "Always hide"}
+      </summary>
       <p className="mt-1 text-xs text-muted">
         Every sentence carrying one of these comes off the page, whatever the slider says.
       </p>
@@ -875,16 +895,14 @@ function AlwaysHide({
           ))}
         </div>
       )}
-      {rules.length === 0 ? (
-        <p className="mt-1.5 text-xs text-muted">Nothing yet.</p>
-      ) : (
+      {rules.length > 0 && (
         <ul aria-label="Phrases always hidden" className="mt-1.5 space-y-1 text-xs">
           {rules.map((rule) => (
             <RuleRow key={rule.id} rule={rule} matched={matched(rule)} onRemove={onRemove} />
           ))}
         </ul>
       )}
-    </section>
+    </details>
   );
 }
 

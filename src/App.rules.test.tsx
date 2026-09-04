@@ -344,14 +344,15 @@ describe("an agent's rule when the reader moves on to another article", () => {
     expect(within(ruleList()).getByText(/2 sentences withheld/)).toBeTruthy();
   });
 
-  it("still names itself and its reason there, with nothing for the reader to open first", async () => {
+  it("still names itself and its reason there, with nothing left for the reader to open", async () => {
     const registered = await openWithAgent("Fight Club (film)");
     await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
 
     await goTo("The Sixth Sense");
 
     const row = within(ruleList()).getByText("How the film came to be made").closest("li") as HTMLElement;
-    expect(row.closest("details")).toBeNull();
+    /* The drawer opened itself when the rule landed and is still open on the article after it. */
+    expect((row.closest("details") as HTMLDetailsElement).open).toBe(true);
     expect(row.textContent).toContain("you said you want to watch it cold");
     expect(row.textContent).toContain("all articles");
     expect(row.textContent).toContain("2 sentences withheld");
@@ -384,6 +385,65 @@ describe("an agent's rule when the reader moves on to another article", () => {
  * Every rule reads the same way down the sidebar, whoever made it: what is hidden, why, and how far
  * it reaches. Only the middle line is an agent's to fill, and only the icon says whose rule it is.
  */
+/**
+ * The drawer is folded away because a reader who has no rules has nothing to read here, and the
+ * slider above it is the control they came for. It opens itself the moment a rule lands, because a
+ * rule that starts withholding sentences without showing its row is a rule filtering silently.
+ */
+describe("the Always hide drawer", () => {
+  function drawer(): HTMLDetailsElement {
+    return screen.getByText(/^Always hide/).closest("details") as HTMLDetailsElement;
+  }
+
+  it("is folded away when the page opens", async () => {
+    await open("Fight Club (film)");
+
+    expect(drawer().open).toBe(false);
+    expect(screen.getByText("Always hide")).toBeTruthy();
+  });
+
+  it("opens itself when the reader adds a phrase", async () => {
+    await open("Fight Club (film)");
+
+    await add("studio");
+
+    expect(drawer().open).toBe(true);
+  });
+
+  it("opens itself when the agent adds a rule", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    expect(drawer().open).toBe(true);
+  });
+
+  it("counts the rules in force on the article the reader has open", async () => {
+    await open("Fight Club (film)");
+    await add("studio");
+    expect(screen.getByText("Always hide · 1")).toBeTruthy();
+
+    await goTo("The Sixth Sense");
+
+    expect(screen.getByText("Always hide")).toBeTruthy();
+  });
+
+  it("says nothing where there is nothing to say", async () => {
+    await open("Fight Club (film)");
+
+    expect(within(drawer()).queryByText(/Nothing yet/)).toBeNull();
+  });
+
+  it("closes again when the reader folds it, and stays closed on the next phrase they type", async () => {
+    await open("Fight Club (film)");
+    await add("studio");
+
+    await userEvent.click(screen.getByText("Always hide · 1"));
+
+    expect(drawer().open).toBe(false);
+  });
+});
+
 describe("the shape of a rule row", () => {
   const LONG_REASON = {
     ...AGENTS_RULE,
