@@ -32,7 +32,8 @@ const ARTICLES: Record<string, FetchedArticle> = {
     "The Sixth Sense",
     `<p>The Sixth Sense is a 1999 film directed by M. Night Shyamalan.</p>
      <h2>Production</h2>
-     <p>Willis signed on once the studio approved the script.</p>`,
+     <p>Willis signed on once the studio approved the script.</p>
+     <p>The studio moved the date twice while casting continued.</p>`,
   ),
 };
 
@@ -294,6 +295,88 @@ describe("a rule the reader's agent added", () => {
     expect(decisions?.textContent).toContain("you said you want to watch it cold");
     expect(decisions?.textContent).toContain("How the film came to be made");
     expect(decisions?.textContent).not.toContain("studio");
+  });
+});
+
+/**
+ * A rule survives an article change and its ids do not, so this is where the two parts of the
+ * design meet: the rule is matched against whatever is on screen now, and what the reader is told
+ * about it is recounted for that article rather than carried over from the last one.
+ */
+describe("an agent's rule when the reader moves on to another article", () => {
+  const EVERYWHERE = { ...AGENTS_RULE, scope: "all" };
+
+  it("holds on the next article without the page being reloaded", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+
+    await goTo("The Sixth Sense");
+
+    expect(screen.queryByText(WILLIS)).toBeNull();
+  });
+
+  it("holds only on the article it was made on when the agent did not say otherwise", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+
+    await goTo("The Sixth Sense");
+
+    expect(screen.getByText(WILLIS)).toBeTruthy();
+  });
+
+  it("comes back with the article it was made on", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [AGENTS_RULE] });
+    await goTo("The Sixth Sense");
+
+    await goTo("Fight Club (film)");
+
+    expect(screen.queryByText(PITT)).toBeNull();
+  });
+
+  it("counts the sentences of the article now open, not the one it was made on", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+    expect(within(ruleList()).getByText(/1 sentence withheld/)).toBeTruthy();
+
+    await goTo("The Sixth Sense");
+
+    expect(within(ruleList()).getByText(/2 sentences withheld/)).toBeTruthy();
+  });
+
+  it("still names itself and its reason there, with nothing for the reader to open first", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+
+    await goTo("The Sixth Sense");
+
+    const row = within(ruleList()).getByText("How the film came to be made").closest("li") as HTMLElement;
+    expect(row.closest("details")).toBeNull();
+    expect(row.textContent).toContain("you said you want to watch it cold");
+    expect(row.textContent).toContain("all articles");
+    expect(row.textContent).toContain("2 sentences withheld");
+    expect(row.textContent).not.toContain("studio");
+  });
+
+  it("keeps its phrases behind the same mask on the new article", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+
+    await goTo("The Sixth Sense");
+
+    await userEvent.click(screen.getByRole("button", { name: /may contain spoilers/ }));
+    expect(within(ruleList()).getByText("studio")).toBeTruthy();
+  });
+
+  it("keeps its place in the record, named with the article it was made on", async () => {
+    const registered = await openWithAgent("Fight Club (film)");
+    await callTool(registered, "add_rules", { rules: [EVERYWHERE] });
+
+    await goTo("The Sixth Sense");
+
+    const decisions = screen.getByRole("heading", { name: "Decisions" }).parentElement;
+    expect(decisions?.textContent).toContain("you said you want to watch it cold");
+    expect(decisions?.textContent).toContain("in Fight Club (film)");
   });
 });
 
