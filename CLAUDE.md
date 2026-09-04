@@ -53,7 +53,9 @@ at the root). The reader must work with no agent attached; the tools are an addi
 - Every decision reaches the screen, and where it goes is set by what the reader cannot afford to
   miss. The sections `read_article_content` touched are named in front of the article, under
   "Your agent has read:", for as long as that article is open, and there is nothing to dismiss them
-  with: reading cannot be undone. Each decision says itself once as it lands — an `apply_mask` by
+  with: reading cannot be undone. Past four the banner counts the rest ("and 5 more") rather than
+  running off the line, and carries the whole list in its `title`; the count is the part that must
+  never be dropped. Each decision says itself once as it lands — an `apply_mask` by
   its counts, an `add_rules` by its label — in a notice that waits while the reader has it under
   the pointer and then goes; the standing record of every decision and every tool call is folded
   away under the article in "Agent activity". Never filter silently, and do not rename the warning or the drawer.

@@ -785,16 +785,28 @@ export default function App() {
   );
 }
 
+/** How many sections the warning names before it starts counting them instead. */
+const NAMED_SECTIONS = 4;
+
 /**
  * The one thing about the agent the reader cannot afford to miss, so it stands in front of the
  * article rather than beside it: the sections it has read in full, which are the sections whose
  * endings it now knows. There is nothing to dismiss it with, because reading cannot be undone and a
  * warning the reader can close is a warning they will close.
+ *
+ * An agent asked to read an article reads most of it, and a banner naming fifteen sections runs off
+ * the line and stops being read at all. So the first few are named and the rest are counted: the
+ * reader still learns that their agent knows more than the banner has room to say, and the whole
+ * list is on the banner itself for anyone who wants it.
  */
 function ReadWarning({ sections }: { sections: string[] }) {
+  const named = sections.slice(0, NAMED_SECTIONS);
+  const rest = sections.length - named.length;
   return (
     <div className="mt-3 rounded-lg bg-warn-surface px-3 py-2 text-xs text-warn-ink">
-      <p className="font-medium">{`Your agent has read: ${sections.join(", ")}`}</p>
+      <p className="font-medium" title={rest > 0 ? sections.join(", ") : undefined}>
+        {`Your agent has read: ${rest > 0 ? `${named.join(", ")} and ${rest} more` : named.join(", ")}`}
+      </p>
       <p className="mt-0.5">
         In this conversation your agent knows what those sections say, even where the page still
         withholds them.

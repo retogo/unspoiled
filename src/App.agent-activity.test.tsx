@@ -28,6 +28,27 @@ const ARTICLES: Record<string, FetchedArticle> = {
      <h2>Reception</h2>
      <p>The detective writes his own name in the notebook and waits for the forty seconds to pass.</p>`,
   ),
+  /* Enough sections that naming every one of them would run the banner off the end of the line. */
+  "The Long Film": fetched(
+    "The Long Film",
+    `<p>The long film opened in 1999 and played in cinemas for the whole of that summer.</p>
+     <h2>Plot</h2>
+     <p>A boy meets a doctor in a small town. The doctor listens to him for weeks on end.</p>
+     <h2>Cast</h2>
+     <p>The cast was assembled over four months of auditions held in three cities.</p>
+     <h2>Production</h2>
+     <p>Filming ran from July to December on location and on two sound stages.</p>
+     <h2>Music</h2>
+     <p>The score was recorded in one week with an orchestra of sixty players.</p>
+     <h2>Release</h2>
+     <p>The film opened on two thousand screens and stayed there through the autumn.</p>
+     <h2>Reception</h2>
+     <p>Reviewers were divided, and the trade papers ran a dozen pieces on the split.</p>
+     <h2>Accolades</h2>
+     <p>It was nominated in four categories and won two of them that February.</p>
+     <h2>Legacy</h2>
+     <p>Later directors cited it often enough that the citations became their own story.</p>`,
+  ),
   "Another Film": fetched(
     "Another Film",
     `<p>Another film opened the same summer and ran for eleven weeks in cinemas.</p>
@@ -66,7 +87,7 @@ function caller(registered: WebMcpTool[]) {
   };
 }
 
-async function readerWithAgent() {
+async function readerWithAgent(title = "The Test Film") {
   const registered = installAgent();
   render(<App />);
   await waitFor(() => expect(registered.length).toBeGreaterThan(0));
@@ -77,7 +98,7 @@ async function readerWithAgent() {
     await waitFor(() => screen.getByRole("heading", { level: 2, name: title }));
   };
 
-  await open("The Test Film");
+  await open(title);
   return { call, open };
 }
 
@@ -140,6 +161,40 @@ describe("what the agent has read, in front of the article", () => {
     await call("read_article_content", { section_ids: ["s0", "s2"] });
 
     expect(screen.getByText("Your agent has read: Lead section, Reception")).toBeTruthy();
+  });
+
+  /*
+   * An agent that reads a long article reads a lot of it, and a banner that names fifteen sections
+   * is a banner that runs off the line and stops being read at all. The count is what has to
+   * survive: the reader still learns that their agent knows more than the four it can name.
+   */
+  it("names the first few and counts the rest, rather than running off the line", async () => {
+    const { call } = await readerWithAgent("The Long Film");
+
+    await call("read_article_content", {});
+
+    expect(
+      screen.getByText("Your agent has read: Lead section, Plot, Cast, Production and 5 more"),
+    ).toBeTruthy();
+  });
+
+  it("keeps the whole list on the banner for a reader who wants it", async () => {
+    const { call } = await readerWithAgent("The Long Film");
+
+    await call("read_article_content", {});
+
+    expect((warning() as HTMLElement).getAttribute("title")).toBe(
+      "Lead section, Plot, Cast, Production, Music, Release, Reception, Accolades, Legacy",
+    );
+  });
+
+  it("names them all while they still fit", async () => {
+    const { call } = await readerWithAgent();
+
+    await call("read_article_content", { section_ids: ["s0", "s1", "s2"] });
+
+    expect(screen.getByText("Your agent has read: Lead section, Plot, Reception")).toBeTruthy();
+    expect((warning() as HTMLElement).getAttribute("title")).toBeNull();
   });
 
   it("stands in front of the article rather than beside it", async () => {
