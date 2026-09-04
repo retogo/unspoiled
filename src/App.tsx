@@ -626,31 +626,32 @@ export default function App() {
                 className="sensitivity mt-2.5 w-full"
               />
               {/*
-                Five names do not fit across one line of the sidebar, so every other one hangs from
-                a longer stem onto a second line. The stem is what carries the name to its point on
-                the scale, and the ends of the scale hang their names inwards to stay on the panel.
+                Five names will not fit across the width of the sidebar — the two that matter most
+                to a reader deciding are also the longest — so the scale is read downwards instead:
+                a row each, with the point it stands for beside it. That number is what ties a row
+                back to the slider above, and it is not part of what the row is called.
               */}
-              <div className="relative mt-0.5 mb-1 hidden h-10 lg:block">
-                {SENSITIVITY_PRESETS.map((preset, index) => (
+              <div
+                role="group"
+                aria-label="Named points on the scale"
+                className="mt-2 mb-1.5 hidden flex-col lg:flex"
+              >
+                {SENSITIVITY_PRESETS.map((preset) => (
                   <button
                     key={preset.label}
                     onClick={() => chooseSensitivity(preset.sensitivity)}
+                    aria-pressed={policy.sensitivity === preset.sensitivity}
                     title={preset.hint}
-                    style={{ left: `${preset.sensitivity}%` }}
-                    className={`absolute top-0 flex flex-col gap-1 whitespace-nowrap text-[11px] ${
-                      index === 0
-                        ? "items-start"
-                        : index === SENSITIVITY_PRESETS.length - 1
-                          ? "-translate-x-full items-end"
-                          : "-translate-x-1/2 items-center"
-                    } ${
+                    className={`flex items-baseline justify-between gap-2 rounded px-1.5 py-1 text-left text-[11px] ${
                       policy.sensitivity === preset.sensitivity
-                        ? "font-medium text-ink"
+                        ? "bg-raised font-medium text-ink"
                         : "text-muted hover:text-ink"
                     }`}
                   >
-                    <span className={`w-px bg-edge ${index % 2 === 1 ? "h-5" : "h-1.5"}`} />
                     {preset.label}
+                    <span aria-hidden="true" className="tabular-nums text-faint">
+                      {preset.sensitivity}
+                    </span>
                   </button>
                 ))}
               </div>

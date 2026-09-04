@@ -144,6 +144,27 @@ describe("the presets marked on the slider", () => {
     }
   });
 
+  /* The number ties a row to the slider; the name is the product's own copy and stands alone. */
+  it("is called by its name alone, with the value it stands for beside it", async () => {
+    await openArticle();
+
+    for (const [label, value] of PRESETS) {
+      const preset = screen.getByRole("button", { name: label });
+      expect(preset.textContent).toBe(`${label}${value}`);
+    }
+  });
+
+  it("marks the one the reader is on", async () => {
+    await openArticle();
+
+    expect(screen.getByRole("button", { name: "Spoiler-safe" }).getAttribute("aria-pressed")).toBe("true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Ending only" }));
+
+    expect(screen.getByRole("button", { name: "Ending only" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Spoiler-safe" }).getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("says what the one the reader has picked withholds", async () => {
     await openArticle();
 
